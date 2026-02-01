@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CG Toolbox</title>
+    <!-- UI/UX Pro Max: Geometric Modern Typography -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Work+Sans:wght@300;400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        /* UI/UX Pro Max: Developer Tool Color Palette */
+        :root {
+            --primary: #1E293B;
+            --secondary: #334155;
+            --cta: #22C55E;
+            --background: #0F172A;
+            --text: #F8FAFC;
+            --text-muted: #94A3B8;
+            --accent: #3B82F6;
+            --success: #22C55E;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --border: #475569;
+            --surface: #1E293B;
+            --surface-hover: #334155;
+
+            /* Design System Variables */
+            --border-radius: 12px;
+            --border-radius-sm: 8px;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Work Sans', 'Segoe UI', sans-serif;
+            background: var(--background);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 标题栏 - Gradient Header */
+        .title-bar {
+            background: linear-gradient(135deg, var(--accent) 0%, #6366F1 100%);
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .title-bar h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .title-bar .subtitle {
+            font-size: 13px;
+            opacity: 0.85;
+            font-weight: 400;
+        }
+
+        /* 主容器 */
+        .container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* 左侧导航 - Glass Effect Sidebar */
+        .sidebar {
+            width: 72px;
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+            padding: 8px 0;
+        }
+
+        .sidebar-item {
+            padding: 16px 0;
+            text-align: center;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: var(--transition);
+            font-size: 24px;
+            margin: 4px 8px;
+            border-radius: var(--border-radius-sm);
+        }
+
+        .sidebar-item:hover {
+            background: var(--surface-hover);
+        }
+
+        .sidebar-item.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-left-color: var(--accent);
+        }
+
+        .sidebar-item span {
+            display: block;
+            font-size: 10px;
+            margin-top: 4px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        /* 内容区 */
+        .content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            background: var(--background);
+        }
+
+        .page {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .page.active {
+            display: flex;
+        }
+
+        /* 按钮系统 - Modern Button Design */
+        .btn {
+            padding: 10px 18px;
+            border: none;
+            border-radius: var(--border-radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: 'Work Sans', sans-serif;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #2563EB;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+            box-shadow: 0 2px 4px rgba(34, 197, 94, 0.3);
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background: #16A34A;
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #DC2626;
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--surface-hover);
+            border-color: var(--accent);
+        }
+
+        .btn-warning {
+            background: var(--warning);
+            color: #1E293B;
+        }
+
+        /* 表单元素 */
+        input[type="text"],
+        input[type="password"],
+        select {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--border-radius-sm);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 13px;
+            font-family: 'Work Sans', sans-serif;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        /* 终端 - Modern Terminal Style */
+        .terminal {
+            background: #0D1117;
+            color: #C9D1D9;
+            font-family: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            padding: 16px;
+            overflow-y: auto;
+            border-radius: var(--border-radius);
+            border: 1px solid var(--border);
+            line-height: 1.6;
+        }
+
+        .terminal .stderr {
+            color: #F85149;
+        }
+
+        .terminal .info {
+            color: var(--success);
+        }
+
+        /* 列表项 */
+        .list-item {
+            padding: 12px 14px;
+            border-radius: var(--border-radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: var(--transition);
+            border: 1px solid transparent;
+        }
+
+        .list-item:hover {
+            background: var(--surface-hover);
+            border-color: var(--border);
+        }
+
+        .list-item.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent);
+        }
+
+        .list-item.current {
+            background: rgba(34, 197, 94, 0.15);
+            border-color: var(--success);
+        }
+
+        /* 分组框 - Card Style */
+        .group-box {
+            border: 1px solid var(--border);
+            border-radius: var(--border-radius);
+            padding: 16px;
+            background: var(--surface);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .group-box-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            letter-spacing: -0.01em;
+        }
+
+        /* ==================== 脚本运行器 ==================== */
+        #scripts-page.active {
+            display: flex;
+        }
+
+        .script-list-panel {
+            width: 280px;
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+            padding: 16px;
+        }
+
+        .script-list-panel .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text);
+        }
+
+        .script-items {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .terminal-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+        }
+
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .terminal-header .title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .terminal-header .actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        #script-terminal {
+            flex: 1;
+        }
+
+        /* ==================== Claude 配置 ==================== */
+        #claude-page {
+            flex-direction: column;
+            padding: 20px;
+            gap: 16px;
+            overflow-y: auto;
+        }
+
+        .config-list-container {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 8px;
+        }
+
+        .config-item {
+            display: grid;
+            grid-template-columns: 140px 1fr 160px;
+            gap: 16px;
+            padding: 12px 14px;
+            border-radius: var(--border-radius-sm);
+            cursor: pointer;
+            font-size: 13px;
+            border: 1px solid transparent;
+            transition: var(--transition);
+        }
+
+        .config-item:hover {
+            background: var(--surface-hover);
+            border-color: var(--border);
+        }
+
+        .config-item.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent);
+        }
+
+        .config-item.current {
+            background: rgba(34, 197, 94, 0.15);
+            border-color: var(--success);
+        }
+
+        .config-item .name {
+            font-weight: 500;
+        }
+
+        .config-item .api {
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .config-item .token {
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+
+        .form-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+
+        .form-row label {
+            min-width: 60px;
+            text-align: right;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .form-row input {
+            flex: 1;
+        }
+
+        .actions-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .actions-row .btn {
+            flex: 1;
+        }
+
+        /* ==================== SVN Patch ==================== */
+        #svn-page {
+            flex-direction: column;
+            padding: 20px;
+            gap: 16px;
+            overflow: hidden;
+        }
+
+        .path-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 10px;
+        }
+
+        .path-row label {
+            min-width: 60px;
+            text-align: right;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .path-row input {
+            flex: 1;
+        }
+
+        .path-info {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            margin-left: 74px;
+            margin-bottom: 8px;
+        }
+
+        .path-actions,
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .operation-row {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            margin-bottom: 14px;
+        }
+
+        .preview-area {
+            flex: 1;
+            display: flex;
+            gap: 16px;
+            overflow: hidden;
+        }
+
+        .diff-panel,
+        .log-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .diff-content,
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .diff-add {
+            color: #7EE787;
+        }
+
+        .diff-del {
+            color: #F85149;
+        }
+
+        .diff-header {
+            color: #79C0FF;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            accent-color: var(--accent);
+        }
+
+        /* 状态栏 */
+        .status-bar {
+            background: var(--primary);
+            padding: 8px 24px;
+            font-size: 11px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--background);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- 标题栏 -->
+    <header class="title-bar">
+        <h1>🛠️ CG Toolbox</h1>
+        <span class="subtitle">Developer Tool Panel</span>
+    </header>
+
+    <div class="container">
+        <!-- 左侧导航 -->
+        <nav class="sidebar">
+            <div class="sidebar-item active" onclick="showPage('scripts')" title="脚本运行器">
+                📜<span>脚本</span>
+            </div>
+            <div class="sidebar-item" onclick="showPage('claude')" title="Claude 配置">
+                🔧<span>配置</span>
+            </div>
+            <div class="sidebar-item" onclick="showPage('svn')" title="SVN Patch">
+                📦<span>SVN</span>
+            </div>
+        </nav>
+
+        <!-- 内容区 -->
+        <main class="content">
+            <!-- 脚本运行器 -->
+            <div id="scripts-page" class="page active">
+                <div class="script-list-panel">
+                    <div class="header">
+                        📜 可用脚本
+                        <button class="btn btn-secondary" style="padding: 6px 10px; font-size: 11px;"
+                            onclick="loadScripts()">↻ 刷新</button>
+                    </div>
+                    <div class="script-items" id="script-items"></div>
+                </div>
+                <div class="terminal-panel">
+                    <div class="terminal-header">
+                        <span class="title" id="selected-script">请选择脚本</span>
+                        <div class="actions">
+                            <button class="btn btn-success" id="run-btn" onclick="runScript()" disabled>▶ 运行</button>
+                            <button class="btn btn-danger" id="stop-btn" onclick="stopScript()" disabled>⏹ 停止</button>
+                            <button class="btn btn-secondary" onclick="clearTerminal()">🗑️ 清空</button>
+                        </div>
+                    </div>
+                    <div class="terminal" id="script-terminal"></div>
+                </div>
+            </div>
+
+            <!-- Claude 配置 -->
+            <div id="claude-page" class="page">
+                <div class="group-box">
+                    <div class="group-box-title">📌 当前激活配置</div>
+                    <div id="current-config">未激活任何配置</div>
+                </div>
+
+                <div class="group-box" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                    <div class="group-box-title">📋 所有配置</div>
+                    <div class="config-list-container" id="config-list"></div>
+                </div>
+
+                <div class="group-box">
+                    <div class="group-box-title">➕ 添加配置</div>
+                    <div class="form-row">
+                        <label>名称:</label>
+                        <input type="text" id="config-name" placeholder="配置名称">
+                        <label>API:</label>
+                        <input type="text" id="config-api" placeholder="https://api.anthropic.com"
+                            value="https://api.anthropic.com">
+                    </div>
+                    <div class="form-row">
+                        <label>Token:</label>
+                        <input type="password" id="config-token" placeholder="API Token" style="flex: 2;">
+                        <button class="btn btn-success" onclick="addConfig()">➕ 添加</button>
+                    </div>
+                </div>
+
+                <div class="actions-row">
+                    <button class="btn btn-primary" onclick="switchConfig()">🔄 切换配置</button>
+                    <button class="btn btn-danger" onclick="deleteConfig()">🗑️ 删除</button>
+                    <button class="btn btn-secondary" onclick="loadConfigs()">↻ 刷新</button>
+                </div>
+            </div>
+
+            <!-- SVN Patch -->
+            <div id="svn-page" class="page">
+                <div class="group-box">
+                    <div class="group-box-title">📁 路径配置</div>
+                    <div class="path-row">
+                        <label>路径 A:</label>
+                        <input type="text" id="path-a" placeholder="本地路径或 SVN URL">
+                    </div>
+                    <div class="path-info" id="path-a-info"></div>
+                    <div class="path-row">
+                        <label>路径 B:</label>
+                        <input type="text" id="path-b" placeholder="目标路径">
+                    </div>
+                    <div class="path-info" id="path-b-info"></div>
+                    <div class="path-actions">
+                        <select id="direction" style="width: 110px;">
+                            <option value="AtoB">A → B</option>
+                            <option value="BtoA">B → A</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="swapPaths()">🔄 交换</button>
+                    </div>
+                </div>
+
+                <div class="group-box">
+                    <div class="group-box-title">⚙️ 操作</div>
+                    <div class="operation-row">
+                        <label style="min-width: 60px; text-align: right;">提交号:</label>
+                        <input type="text" id="revision" placeholder="12345 或 12345:12350" style="width: 180px;">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="from-repo-root"> 仓库根
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="use-parent"> 上级路径
+                        </label>
+                    </div>
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="viewLog()">📋 查看日志</button>
+                        <button class="btn btn-success" onclick="generatePatch()">📄 生成 Patch</button>
+                        <button class="btn btn-secondary" id="save-patch-btn" onclick="savePatch()" disabled>💾
+                            保存</button>
+                        <button class="btn btn-warning" id="apply-patch-btn" onclick="applyPatch()" disabled>🚀
+                            应用</button>
+                    </div>
+                </div>
+
+                <div class="preview-area">
+                    <div class="diff-panel group-box">
+                        <div class="group-box-title">📝 Patch 预览</div>
+                        <div class="diff-content terminal" id="diff-content"></div>
+                    </div>
+                    <div class="log-panel group-box">
+                        <div class="group-box-title">
+                            📋 操作日志
+                            <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;"
+                                onclick="clearSvnLog()">清空</button>
+                        </div>
+                        <div class="log-content terminal" id="svn-log"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 状态栏 -->
+    <footer class="status-bar">
+        <span id="status-text">就绪</span>
+        <span>http://localhost:8000</span>
+    </footer>
+
+    <script>
+        let selectedScript = null;
+        let selectedConfig = null;
+        let patchContent = '';
+        let ws = null;
+
+        function showPage(pageName) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
+            document.getElementById(pageName + '-page').classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+
+        function setStatus(text) {
+            document.getElementById('status-text').textContent = text;
+        }
+
+        async function api(url, options = {}) {
+            const response = await fetch(url, {
+                headers: { 'Content-Type': 'application/json' },
+                ...options
+            });
+            return response.json();
+        }
+
+        // ==================== 脚本运行器 ====================
+        async function loadScripts() {
+            const scripts = await api('/api/scripts');
+            const container = document.getElementById('script-items');
+            container.innerHTML = scripts.map(s => `
+                <div class="list-item ${selectedScript === s.path ? 'active' : ''}" 
+                     onclick="selectScript('${s.path}', '${s.name}')">
+                    <span>${s.icon}</span>
+                    <span>${s.name}</span>
+                </div>
+            `).join('') || '<div style="color: var(--text-muted); padding: 16px; text-align: center;">暂无脚本</div>';
+        }
+
+        function selectScript(path, name) {
+            selectedScript = path;
+            document.getElementById('selected-script').textContent = name;
+            document.getElementById('run-btn').disabled = false;
+            loadScripts();
+        }
+
+        function runScript() {
+            if (!selectedScript) return;
+
+            const terminal = document.getElementById('script-terminal');
+            terminal.innerHTML = '<div class="info">▶ Starting: ' + selectedScript.split('\\').pop() + '\n</div>';
+
+            document.getElementById('run-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+
+            ws = new WebSocket('ws://' + location.host + '/ws/terminal');
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ action: 'run', script: selectedScript }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'stdout' || data.type === 'stderr') {
+                    const div = document.createElement('div');
+                    div.className = data.type;
+                    div.textContent = data.data;
+                    terminal.appendChild(div);
+                    terminal.scrollTop = terminal.scrollHeight;
+                } else if (data.type === 'end') {
+                    const div = document.createElement('div');
+                    div.className = 'info';
+                    div.textContent = '\n✓ Process exited with code ' + data.exitCode;
+                    terminal.appendChild(div);
+                    document.getElementById('run-btn').disabled = false;
+                    document.getElementById('stop-btn').disabled = true;
+                }
+            };
+
+            ws.onerror = () => {
+                document.getElementById('run-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+            };
+        }
+
+        function stopScript() {
+            if (ws) ws.send(JSON.stringify({ action: 'terminate' }));
+            api('/api/scripts/terminate', { method: 'POST' });
+            document.getElementById('run-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+        }
+
+        function clearTerminal() {
+            document.getElementById('script-terminal').innerHTML = '';
+        }
+
+        // ==================== Claude 配置 ====================
+        async function loadConfigs() {
+            const configs = await api('/api/claude/configs');
+            const container = document.getElementById('config-list');
+            const currentConfig = configs.find(c => c.isCurrent);
+
+            document.getElementById('current-config').innerHTML = currentConfig
+                ? `<div style="color: var(--success); font-weight: 600; font-size: 15px;">⭐ ${currentConfig.name}</div>
+                   <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">${currentConfig.config.baseApi}</div>`
+                : '<span style="color: var(--text-muted);">未激活任何配置</span>';
+
+            container.innerHTML = configs.map(c => `
+                <div class="config-item ${c.isCurrent ? 'current' : ''} ${selectedConfig === c.name ? 'active' : ''}"
+                     onclick="selectConfig('${c.name}')">
+                    <span class="name">${c.isCurrent ? '⭐ ' : ''}${c.name}</span>
+                    <span class="api">${c.config.baseApi}</span>
+                    <span class="token">${c.config.authToken.substring(0, 16)}...</span>
+                </div>
+            `).join('') || '<div style="text-align: center; color: var(--text-muted); padding: 24px;">暂无配置，请添加</div>';
+        }
+
+        function selectConfig(name) {
+            selectedConfig = name;
+            loadConfigs();
+        }
+
+        async function addConfig() {
+            const name = document.getElementById('config-name').value.trim();
+            const baseApi = document.getElementById('config-api').value.trim();
+            const authToken = document.getElementById('config-token').value.trim();
+
+            if (!name || !baseApi || !authToken) { alert('请填写完整'); return; }
+
+            await api('/api/claude/configs', {
+                method: 'POST',
+                body: JSON.stringify({ name, config: { baseApi, authToken } })
+            });
+
+            alert('✓ 添加成功');
+            document.getElementById('config-name').value = '';
+            document.getElementById('config-token').value = '';
+            loadConfigs();
+        }
+
+        async function switchConfig() {
+            if (!selectedConfig) { alert('请先选择配置'); return; }
+
+            // 防止重复点击
+            const btn = event.target;
+            if (btn.disabled) return;
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = '⏳ 切换中...';
+            setStatus('正在切换配置...');
+
+            try {
+                const result = await api('/api/claude/switch/' + selectedConfig, { method: 'POST' });
+                alert(result.message);
+                loadConfigs();
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+                setStatus('就绪');
+            }
+        }
+
+        async function deleteConfig() {
+            if (!selectedConfig) { alert('请先选择配置'); return; }
+            if (!confirm('确定删除 "' + selectedConfig + '"?')) return;
+            await api('/api/claude/configs/' + selectedConfig, { method: 'DELETE' });
+            alert('✓ 已删除');
+            selectedConfig = null;
+            loadConfigs();
+        }
+
+        // ==================== SVN Patch ====================
+        function svnLog(message, level = 'info') {
+            const log = document.getElementById('svn-log');
+            const time = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = level;
+            div.textContent = '[' + time + '] ' + message;
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearSvnLog() { document.getElementById('svn-log').innerHTML = ''; }
+
+        async function viewLog() {
+            const revision = document.getElementById('revision').value.trim();
+            const pathA = document.getElementById('path-a').value.trim();
+            if (!revision || !pathA) { alert('请输入提交号和路径'); return; }
+
+            setStatus('获取日志...');
+            svnLog('获取 r' + revision + ' 日志...');
+
+            const result = await api('/api/svn/log?revision=' + revision + '&url=' + encodeURIComponent(pathA), { method: 'POST' });
+            document.getElementById('diff-content').textContent = result.log;
+            svnLog(result.success ? '完成' : '失败', result.success ? 'info' : 'stderr');
+            setStatus('就绪');
+        }
+
+        async function generatePatch() {
+            const revision = document.getElementById('revision').value.trim();
+            const pathA = document.getElementById('path-a').value.trim();
+            if (!revision || !pathA) { alert('请输入提交号和路径'); return; }
+
+            setStatus('生成 Patch...');
+            svnLog('生成 r' + revision + ' Patch...');
+
+            const result = await api('/api/svn/diff', {
+                method: 'POST',
+                body: JSON.stringify({
+                    revision, url: pathA,
+                    fromRepoRoot: document.getElementById('from-repo-root').checked,
+                    parentLevels: document.getElementById('use-parent').checked ? 1 : 0
+                })
+            });
+
+            if (result.success) {
+                patchContent = result.content;
+                document.getElementById('diff-content').innerHTML = highlightDiff(result.content);
+                document.getElementById('save-patch-btn').disabled = !result.content;
+                document.getElementById('apply-patch-btn').disabled = !result.content;
+                svnLog(result.content ? '成功 (' + result.content.length + ' bytes)' : '内容为空!', result.content ? 'info' : 'stderr');
+            } else {
+                svnLog('失败: ' + result.error, 'stderr');
+            }
+            setStatus('就绪');
+        }
+
+        function highlightDiff(content) {
+            if (!content) return '';
+            return content.split('\n').map(line => {
+                const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                if (line.startsWith('+') && !line.startsWith('+++')) return '<span class="diff-add">' + escaped + '</span>';
+                if (line.startsWith('-') && !line.startsWith('---')) return '<span class="diff-del">' + escaped + '</span>';
+                if (line.startsWith('@@') || line.startsWith('Index:')) return '<span class="diff-header">' + escaped + '</span>';
+                return escaped;
+            }).join('\n');
+        }
+
+        function savePatch() {
+            if (!patchContent) return;
+            const blob = new Blob([patchContent], { type: 'text/plain' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'patch_r' + document.getElementById('revision').value.replace(':', '_') + '.patch';
+            a.click();
+            svnLog('已下载');
+        }
+
+        async function applyPatch() {
+            if (!patchContent) return;
+            const pathB = document.getElementById('path-b').value.trim();
+            const pathA = document.getElementById('path-a').value.trim();
+            if (!pathB) { alert('请输入目标路径 B'); return; }
+            if (!confirm('应用到: ' + pathB + '?')) return;
+
+            setStatus('应用 Patch...');
+            svnLog('应用到 ' + pathB + '...');
+
+            const result = await api('/api/svn/apply', {
+                method: 'POST',
+                body: JSON.stringify({ patchContent, targetDir: pathB, sourcePath: pathA, revision: document.getElementById('revision').value })
+            });
+
+            svnLog(result.message, result.success ? 'info' : 'stderr');
+            alert(result.message);
+            setStatus('就绪');
+        }
+
+        function swapPaths() {
+            const a = document.getElementById('path-a');
+            const b = document.getElementById('path-b');
+            [a.value, b.value] = [b.value, a.value];
+            svnLog('已交换路径');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadScripts();
+            loadConfigs();
+        });
+    </script>
+</body>
+
+</html>

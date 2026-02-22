@@ -1,0 +1,13 @@
+﻿{
+  "packageName": "com.tencent.tmgp.pubgmhd",
+  "gameName": "ShadowTrackerExtra",
+  "iniName": "Engine.ini",
+  "pathMode": "auto",
+  "deviceSerial": "",
+  "sourceIniPath": "",
+  "sections": {
+    "ConsoleVariables": {
+      "r.FSOC.MaxStaticMeshOccluderQuads": "1000"
+    }
+  }
+}

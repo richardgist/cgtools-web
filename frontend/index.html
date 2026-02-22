@@ -1,167 +1,408 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CG Toolbox</title>
-    <!-- UI/UX Pro Max: Geometric Modern Typography -->
     <link
-        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Work+Sans:wght@300;400;500&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
-    <!-- 标题栏 -->
-    <header class="title-bar">
-        <h1>🛠️ CG Toolbox</h1>
-        <span class="subtitle">Developer Tool Panel</span>
-    </header>
+    <div class="app-container">
+        <!-- Navigation Sidebar -->
+        <nav class="navigation-view">
+            <div class="nav-header">
+                <div class="nav-toggle session-drag-region">
+                    <span class="icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                        </svg>
+                    </span>
+                </div>
+            </div>
 
-    <div class="container">
-        <!-- 左侧导航 -->
-        <nav class="sidebar">
-            <div class="sidebar-item active" onclick="showPage('scripts')" title="脚本运行器">
-                📜<span>脚本</span>
+            <div class="nav-items">
+                <div class="nav-item active" onclick="showPage('home')" title="主页">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                        </svg>
+                    </span>
+                    <span class="nav-label">主页</span>
+                    <div class="nav-indicator"></div>
+                </div>
+
+                <div class="nav-separator"></div>
+                <div class="nav-group-title">工具</div>
+
+                <div class="nav-item" onclick="showPage('scripts')" title="脚本运行器">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="4 17 10 11 4 5"></polyline>
+                            <line x1="12" y1="19" x2="20" y2="19"></line>
+                        </svg>
+                    </span>
+                    <span class="nav-label">脚本运行器</span>
+                    <div class="nav-indicator"></div>
+                </div>
+
+                <div class="nav-item" onclick="showPage('claude')" title="Claude 配置">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+                            <circle cx="12" cy="5" r="2"></circle>
+                            <path d="M12 7v4"></path>
+                            <line x1="8" y1="16" x2="8" y2="16"></line>
+                            <line x1="16" y1="16" x2="16" y2="16"></line>
+                        </svg>
+                    </span>
+                    <span class="nav-label">Claude 配置</span>
+                    <div class="nav-indicator"></div>
+                </div>
+
+                <div class="nav-item" onclick="showPage('svn')" title="SVN Patch">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                    </span>
+                    <span class="nav-label">SVN Patch</span>
+                    <div class="nav-indicator"></div>
+                </div>
             </div>
-            <div class="sidebar-item" onclick="showPage('claude')" title="Claude 配置">
-                🔧<span>配置</span>
-            </div>
-            <div class="sidebar-item" onclick="showPage('svn')" title="SVN Patch">
-                📦<span>SVN</span>
+
+            <div class="nav-footer">
+                <div class="nav-item" onclick="showPage('settings')" title="设置">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                            </path>
+                        </svg>
+                    </span>
+                    <span class="nav-label">设置</span>
+                    <div class="nav-indicator"></div>
+                </div>
             </div>
         </nav>
 
-        <!-- 内容区 -->
-        <main class="content">
-            <!-- 脚本运行器 -->
-            <div id="scripts-page" class="page active">
-                <div class="script-list-panel">
-                    <div class="header">
-                        📜 可用脚本
-                        <button class="btn btn-secondary" style="padding: 6px 10px; font-size: 11px;"
-                            onclick="loadScripts()">↻ 刷新</button>
+        <!-- Main Content Area -->
+        <main class="content-view">
+            <!-- Home Page (Dashboard) -->
+            <div id="home-page" class="page active">
+                <div class="page-header-hero">
+                    <div class="hero-content">
+                        <div class="hero-title">CG Toolbox</div>
+                        <div class="hero-subtitle">欢迎回来，开发者</div>
                     </div>
-                    <div class="script-items" id="script-items"></div>
                 </div>
-                <div class="terminal-panel">
-                    <div class="terminal-header">
-                        <span class="title" id="selected-script">请选择脚本</span>
-                        <div class="actions">
-                            <button class="btn btn-success" id="run-btn" onclick="runScript()" disabled>▶ 运行</button>
-                            <button class="btn btn-danger" id="stop-btn" onclick="stopScript()" disabled>⏹ 停止</button>
-                            <button class="btn btn-secondary" onclick="clearTerminal()">🗑️ 清空</button>
+
+                <div class="dashboard-grid">
+                    <div class="dashboard-card" onclick="showPage('scripts')">
+                        <div class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="4 17 10 11 4 5"></polyline>
+                                <line x1="12" y1="19" x2="20" y2="19"></line>
+                            </svg>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-title">脚本运行器</div>
+                            <div class="card-desc">并在本地环境中执行 Python/Bat/Ps1 脚本</div>
+                        </div>
+                        <div class="card-action">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                <polyline points="12 5 19 12 12 19"></polyline>
+                            </svg>
                         </div>
                     </div>
-                    <div class="terminal" id="script-terminal"></div>
+
+                    <div class="dashboard-card" onclick="showPage('claude')">
+                        <div class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+                                <circle cx="12" cy="5" r="2"></circle>
+                                <path d="M12 7v4"></path>
+                                <line x1="8" y1="16" x2="8" y2="16"></line>
+                                <line x1="16" y1="16" x2="16" y2="16"></line>
+                            </svg>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-title">Claude 配置</div>
+                            <div class="card-desc">管理 API 密钥、Base URL 和环境变量</div>
+                        </div>
+                        <div class="card-action">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                <polyline points="12 5 19 12 12 19"></polyline>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card" onclick="showPage('svn')">
+                        <div class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-title">SVN Patch</div>
+                            <div class="card-desc">生成、查看和应用 SVN 补丁</div>
+                        </div>
+                        <div class="card-action">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                <polyline points="12 5 19 12 12 19"></polyline>
+                            </svg>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Claude 配置 -->
+            <!-- Scripts Page -->
+            <div id="scripts-page" class="page">
+                <div class="standard-page-header">
+                    <h1 class="header-title">脚本运行器</h1>
+                    <div class="header-controls">
+                        <button class="fluent-btn-icon" onclick="loadScripts()" title="刷新">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <polyline points="1 20 1 14 7 14"></polyline>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="page-content-scroll">
+                    <div class="page-grid">
+                        <section class="fluent-card script-list-panel">
+                            <div class="card-header">可用脚本</div>
+                            <div class="script-items" id="script-items"></div>
+                        </section>
+
+                        <section class="fluent-card terminal-panel">
+                            <div class="card-header">
+                                <span id="selected-script">请选择脚本</span>
+                                <div class="terminal-actions">
+                                    <button class="fluent-btn" id="run-btn" onclick="runScript()" disabled>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round">
+                                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                        </svg>
+                                        运行
+                                    </button>
+                                    <button class="fluent-btn danger" id="stop-btn" onclick="stopScript()" disabled>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                        </svg>
+                                        停止
+                                    </button>
+                                    <button class="fluent-btn sub" onclick="clearTerminal()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round">
+                                            <polyline points="3 6 5 6 21 6"></polyline>
+                                            <path
+                                                d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                            </path>
+                                            <line x1="10" y1="11" x2="10" y2="17"></line>
+                                            <line x1="14" y1="11" x2="14" y2="17"></line>
+                                        </svg>
+                                        清空
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="terminal" id="script-terminal"></div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Claude Page -->
             <div id="claude-page" class="page">
-                <div class="group-box">
-                    <div class="group-box-title">📌 当前激活配置</div>
-                    <div id="current-config">未激活任何配置</div>
+                <div class="standard-page-header">
+                    <h1 class="header-title">Claude 配置</h1>
                 </div>
 
-                <div class="group-box" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-                    <div class="group-box-title">📋 所有配置</div>
-                    <div class="config-list-container" id="config-list"></div>
-                </div>
-
-                <div class="group-box">
-                    <div class="group-box-title">➕ 添加配置</div>
-                    <div class="form-row">
-                        <label>名称:</label>
-                        <input type="text" id="config-name" placeholder="配置名称">
-                        <label>API:</label>
-                        <input type="text" id="config-api" placeholder="https://api.anthropic.com"
-                            value="https://api.anthropic.com">
+                <div class="page-content-scroll">
+                    <div class="fluent-setting-group">
+                        <div class="setting-header">当前激活状态</div>
+                        <div class="fluent-card padding-md setting-card">
+                            <div class="setting-info" id="current-config">未激活任何配置</div>
+                        </div>
                     </div>
-                    <div class="form-row">
-                        <label>Token:</label>
-                        <input type="password" id="config-token" placeholder="API Token" style="flex: 2;">
-                        <button class="btn btn-success" onclick="addConfig()">➕ 添加</button>
-                    </div>
-                </div>
 
-                <div class="actions-row">
-                    <button class="btn btn-primary" onclick="switchConfig()">🔄 切换配置</button>
-                    <button class="btn btn-danger" onclick="deleteConfig()">🗑️ 删除</button>
-                    <button class="btn btn-secondary" onclick="loadConfigs()">↻ 刷新</button>
+                    <div class="fluent-setting-group">
+                        <div class="setting-header">添加新配置</div>
+                        <div class="fluent-card padding-lg">
+                            <div class="form-grid">
+                                <input type="text" class="fluent-input" id="config-name"
+                                    placeholder="配置名称 (e.g. Production)">
+                                <input type="text" class="fluent-input" id="config-api" placeholder="API URL"
+                                    value="https://api.anthropic.com">
+                                <input type="password" class="fluent-input span-2" id="config-token"
+                                    placeholder="sk-...">
+                            </div>
+                            <div class="form-actions right"
+                                style="margin-top: 16px; display: flex; justify-content: flex-end;">
+                                <button class="fluent-btn primary" onclick="addConfig()">+ 添加</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="fluent-setting-group">
+                        <div class="setting-header"
+                            style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>已保存配置</span>
+                            <button class="fluent-btn sub" onclick="loadConfigs()"
+                                style="height: 24px; padding: 0 8px; font-size: 12px;">刷新列表</button>
+                        </div>
+                        <div class="fluent-card no-padding">
+                            <div class="config-list-container" id="config-list"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- SVN Patch -->
+            <!-- SVN Page -->
             <div id="svn-page" class="page">
-                <div class="group-box">
-                    <div class="group-box-title">📁 路径配置</div>
-                    <div class="path-row">
-                        <label>路径 A:</label>
-                        <input type="text" id="path-a" placeholder="本地路径或 SVN URL">
-                    </div>
-                    <div class="path-info" id="path-a-info"></div>
-                    <div class="path-row">
-                        <label>路径 B:</label>
-                        <input type="text" id="path-b" placeholder="目标路径">
-                    </div>
-                    <div class="path-info" id="path-b-info"></div>
-                    <div class="path-actions">
-                        <select id="direction" style="width: 110px;">
-                            <option value="AtoB">A → B</option>
-                            <option value="BtoA">B → A</option>
-                        </select>
-                        <button class="btn btn-secondary" onclick="swapPaths()">🔄 交换</button>
-                    </div>
+                <div class="standard-page-header">
+                    <h1 class="header-title">SVN Patch</h1>
                 </div>
 
-                <div class="group-box">
-                    <div class="group-box-title">⚙️ 操作</div>
-                    <div class="operation-row">
-                        <label style="min-width: 60px; text-align: right;">提交号:</label>
-                        <input type="text" id="revision" placeholder="12345 或 12345:12350" style="width: 180px;">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="from-repo-root"> 仓库根
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="use-parent"> 上级路径
-                        </label>
-                    </div>
-                    <div class="action-buttons">
-                        <button class="btn btn-primary" onclick="viewLog()">📋 查看日志</button>
-                        <button class="btn btn-success" onclick="generatePatch()">📄 生成 Patch</button>
-                        <button class="btn btn-secondary" id="save-patch-btn" onclick="savePatch()" disabled>💾
-                            保存</button>
-                        <button class="btn btn-warning" id="apply-patch-btn" onclick="applyPatch()" disabled>🚀
-                            应用</button>
-                    </div>
-                </div>
+                <div class="page-content-scroll">
+                    <div class="svn-grid-layout">
+                        <!-- Configuration -->
+                        <div class="fluent-card">
+                            <div class="card-header">路径与设置</div>
+                            <div class="card-body form-stack">
+                                <div class="input-group">
+                                    <label>路径 A (源/基准)</label>
+                                    <input type="text" class="fluent-input" id="path-a" placeholder="SVN URL 或本地路径">
+                                </div>
+                                <div class="input-group">
+                                    <label>路径 B (目标)</label>
+                                    <input type="text" class="fluent-input" id="path-b" placeholder="本地路径">
+                                </div>
+                                <div class="row-actions">
+                                    <button class="fluent-btn sub" onclick="swapPaths()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round">
+                                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                                            <polyline points="19 12 12 19 5 12"></polyline>
+                                        </svg>
+                                        交换路径
+                                    </button>
+                                </div>
 
-                <div class="preview-area">
-                    <div class="diff-panel group-box">
-                        <div class="group-box-title">📝 Patch 预览</div>
+                                <div class="separator-line"></div>
+
+                                <div class="input-group">
+                                    <label>Revision / 提交号</label>
+                                    <input type="text" class="fluent-input" id="revision" placeholder="例如: 12345">
+                                </div>
+                                <div class="checkbox-group">
+                                    <label class="fluent-checkbox">
+                                        <input type="checkbox" id="from-repo-root"> <span>从仓库根目录</span>
+                                    </label>
+                                    <label class="fluent-checkbox">
+                                        <input type="checkbox" id="use-parent"> <span>包含上级目录</span>
+                                    </label>
+                                </div>
+                                <div class="action-bar">
+                                    <button class="fluent-btn" onclick="viewLog()">查看日志</button>
+                                    <button class="fluent-btn primary" onclick="generatePatch()">生成 diff</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="fluent-card">
+                            <div class="card-header">Patch 操作</div>
+                            <div class="card-body">
+                                <div class="placeholder-text">生成 patch 后可用</div>
+                                <div class="action-stack">
+                                    <button class="fluent-btn" id="save-patch-btn" onclick="savePatch()" disabled>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                        保存 .patch 文件
+                                    </button>
+                                    <button class="fluent-btn" id="apply-patch-btn" onclick="applyPatch()" disabled>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round">
+                                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                        </svg>
+                                        应用到路径 B
+                                    </button>
+                                </div>
+                                <div class="separator-line"></div>
+                                <div class="log-container-mini" id="svn-log"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Output -->
+                    <div class="fluent-card flex-grow margin-top-lg">
+                        <div class="card-header">预览输出</div>
                         <div class="diff-content terminal" id="diff-content"></div>
                     </div>
-                    <div class="log-panel group-box">
-                        <div class="group-box-title">
-                            📋 操作日志
-                            <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;"
-                                onclick="clearSvnLog()">清空</button>
-                        </div>
-                        <div class="log-content terminal" id="svn-log"></div>
+                </div>
+            </div>
+
+            <!-- Settings Page (Placeholder) -->
+            <div id="settings-page" class="page">
+                <div class="standard-page-header">
+                    <h1 class="header-title">设置</h1>
+                </div>
+                <div class="page-content-scroll">
+                    <div class="fluent-card padding-lg">
+                        <h3>关于 CG Toolbox</h3>
+                        <p>Web版开发者工具箱 v1.0</p>
                     </div>
                 </div>
             </div>
         </main>
     </div>
 
-    <!-- 状态栏 -->
-    <footer class="status-bar">
+    <!-- Status Bar (Toast-like in future, currently fixed bottom) -->
+    <footer class="app-status-bar">
         <span id="status-text">就绪</span>
-        <span>http://localhost:8000</span>
+        <span class="version-tag">v1.0.0</span>
     </footer>
-
     <script src="app.js"></script>
 </body>
 

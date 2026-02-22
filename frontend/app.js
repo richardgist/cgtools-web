@@ -4,16 +4,24 @@
 
 // ==================== 全局状态 ====================
 let selectedScript = null;
-let selectedConfig = null;
 let patchContent = '';
 let ws = null;
 
 // ==================== 通用工具 ====================
 function showPage(pageName) {
+    // Hide all pages
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
-    document.getElementById(pageName + '-page').classList.add('active');
-    event.currentTarget.classList.add('active');
+    // Deactivate all nav items
+    document.querySelectorAll('.nav-item').forEach(s => s.classList.remove('active'));
+
+    // Show target page
+    const targetPage = document.getElementById(pageName + '-page');
+    if (targetPage) targetPage.classList.add('active');
+
+    // Activate nav item
+    // Find the nav item that corresponds to this page
+    const navItem = document.querySelector(`.nav-item[onclick="showPage('${pageName}')"]`);
+    if (navItem) navItem.classList.add('active');
 }
 
 function setStatus(text) {
@@ -38,7 +46,7 @@ async function loadScripts() {
             <span>${s.icon}</span>
             <span>${s.name}</span>
         </div>
-    `).join('') || '<div style="color: var(--text-muted); padding: 16px; text-align: center;">暂无脚本</div>';
+    `).join('') || '<div style="color: var(--text-secondary); padding: 16px; text-align: center;">暂无脚本</div>';
 }
 
 function selectScript(path, name) {
@@ -105,23 +113,58 @@ async function loadConfigs() {
     const currentConfig = configs.find(c => c.isCurrent);
 
     document.getElementById('current-config').innerHTML = currentConfig
-        ? `<div style="color: var(--success); font-weight: 600; font-size: 15px;">⭐ ${currentConfig.name}</div>
-           <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px;">${currentConfig.config.baseApi}</div>`
-        : '<span style="color: var(--text-muted);">未激活任何配置</span>';
+        ? `<div style="color: var(--success); font-weight: 600; font-size: 15px;">⭐ 当前激活: ${currentConfig.name}</div>
+           <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">${currentConfig.config.baseApi}</div>`
+        : '<span style="color: var(--text-tertiary);">未激活任何配置</span>';
 
-    container.innerHTML = configs.map(c => `
-        <div class="config-item ${c.isCurrent ? 'current' : ''} ${selectedConfig === c.name ? 'active' : ''}"
-             onclick="selectConfig('${c.name}')">
-            <span class="name">${c.isCurrent ? '⭐ ' : ''}${c.name}</span>
-            <span class="api">${c.config.baseApi}</span>
-            <span class="token">${c.config.authToken.substring(0, 16)}...</span>
+    container.innerHTML = configs.map(c => {
+        const token = c.config.authToken || '';
+        const safeToken = token.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        return `
+        <div class="config-item ${c.isCurrent ? 'current' : ''}">
+            <div class="config-info">
+                <span class="name">${c.isCurrent ? '⭐ ' : ''}${c.name}</span>
+                <span class="api">${c.config.baseApi}</span>
+                <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                    <span class="token-text" data-token="${safeToken}" style="font-family: monospace;">••••••••••••••••••••••••••••</span>
+                    <svg onclick="toggleToken(this)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="cursor: pointer; opacity: 0.7;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </div>
+            </div>
+            <div class="config-actions">
+                <button class="fluent-btn sub" onclick="editConfigName('${c.name}', '${c.config.baseApi}', '${safeToken}', event)">编辑</button>
+                ${!c.isCurrent ? `<button class="fluent-btn primary" onclick="switchConfigName('${c.name}', event)">启用</button>` : `<button class="fluent-btn" style="border-color: var(--success); color: var(--success);" onclick="switchConfigName('${c.name}', event)">重新启用</button>`}
+                <button class="fluent-btn danger" onclick="deleteConfigName('${c.name}', event)">删除</button>
+            </div>
         </div>
-    `).join('') || '<div style="text-align: center; color: var(--text-muted); padding: 24px;">暂无配置，请添加</div>';
+        `;
+    }).join('') || '<div style="text-align: center; color: var(--text-tertiary); padding: 24px;">暂无配置，请添加</div>';
 }
 
-function selectConfig(name) {
-    selectedConfig = name;
-    loadConfigs();
+function toggleToken(btn) {
+    const textSpan = btn.previousElementSibling;
+    const token = textSpan.getAttribute('data-token');
+    if (textSpan.textContent.includes('••••')) {
+        textSpan.textContent = token;
+        btn.style.stroke = 'var(--accent-default)';
+        btn.style.opacity = '1';
+    } else {
+        textSpan.textContent = '••••••••••••••••••••••••••••';
+        btn.style.stroke = 'currentColor';
+        btn.style.opacity = '0.7';
+    }
+}
+
+function editConfigName(name, api, token, event) {
+    if (event) event.stopPropagation();
+    document.getElementById('config-name').value = name;
+    document.getElementById('config-api').value = api;
+    document.getElementById('config-token').value = token;
+
+    document.getElementById('config-name').focus();
+
+    // 修改按钮文字为保存修改
+    const addBtn = document.querySelector('button[onclick="addConfig()"]');
+    if (addBtn) addBtn.textContent = '保存修改';
 }
 
 async function addConfig() {
@@ -136,40 +179,48 @@ async function addConfig() {
         body: JSON.stringify({ name, config: { baseApi, authToken } })
     });
 
-    alert('✓ 添加成功');
+    alert('✓ 保存成功');
     document.getElementById('config-name').value = '';
     document.getElementById('config-token').value = '';
+
+    const addBtn = document.querySelector('button[onclick="addConfig()"]');
+    if (addBtn) addBtn.textContent = '+ 添加';
+
     loadConfigs();
 }
 
-async function switchConfig() {
-    if (!selectedConfig) { alert('请先选择配置'); return; }
+async function switchConfigName(name, event) {
+    if (event) event.stopPropagation();
 
-    // 防止重复点击
-    const btn = event.target;
-    if (btn.disabled) return;
-    btn.disabled = true;
-    const originalText = btn.textContent;
-    btn.textContent = '⏳ 切换中...';
+    const btn = event ? event.target : null;
+    let originalText = '';
+    if (btn) {
+        if (btn.disabled) return;
+        btn.disabled = true;
+        originalText = btn.textContent;
+        btn.textContent = '⏳...';
+    }
+
     setStatus('正在切换配置...');
 
     try {
-        const result = await api('/api/claude/switch/' + selectedConfig, { method: 'POST' });
+        const result = await api('/api/claude/switch/' + name, { method: 'POST' });
         alert(result.message);
         loadConfigs();
     } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
         setStatus('就绪');
     }
 }
 
-async function deleteConfig() {
-    if (!selectedConfig) { alert('请先选择配置'); return; }
-    if (!confirm('确定删除 "' + selectedConfig + '"?')) return;
-    await api('/api/claude/configs/' + selectedConfig, { method: 'DELETE' });
-    alert('✓ 已删除');
-    selectedConfig = null;
+async function deleteConfigName(name, event) {
+    if (event) event.stopPropagation();
+    if (!confirm('确定删除 "' + name + '"?')) return;
+    await api('/api/claude/configs/' + name, { method: 'DELETE' });
+    alert('✓ 已删除: ' + name);
     loadConfigs();
 }
 
@@ -279,6 +330,9 @@ function swapPaths() {
 
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', () => {
+    // Default to home
+    showPage('home');
+
     loadScripts();
     loadConfigs();
 });

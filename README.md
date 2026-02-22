@@ -18,7 +18,7 @@ pip install -r requirements.txt
 python server.py
 ```
 
-访问 http://localhost:8000
+访问 http://localhost:18432
 
 ## 项目结构
 

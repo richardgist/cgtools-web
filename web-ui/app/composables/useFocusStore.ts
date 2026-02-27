@@ -1,0 +1,460 @@
+// 专注清单 - 核心状态管理
+import { ref, computed, watch, type Ref } from 'vue'
+
+// ==================== Types ====================
+export interface FocusTask {
+    id: string
+    name: string
+    completed: boolean
+    completedAt?: number
+    listId: string
+    pomodoroEstimate: number
+    pomodoroCompleted: number
+    priority: 'none' | 'low' | 'medium' | 'high'
+    dueDate?: string // YYYY-MM-DD
+    notes: string
+    createdAt: number
+    order: number
+}
+
+export interface FocusList {
+    id: string
+    name: string
+    color: string
+    folderId?: string
+    order: number
+    createdAt: number
+}
+
+export interface FocusFolder {
+    id: string
+    name: string
+    collapsed: boolean
+    order: number
+}
+
+export interface PomodoroRecord {
+    id: string
+    taskId: string
+    taskName: string
+    listId: string
+    startTime: number
+    endTime: number
+    duration: number // in seconds
+    completed: boolean
+}
+
+export interface FocusSettings {
+    pomodoroDuration: number    // minutes
+    shortBreakDuration: number  // minutes
+    longBreakDuration: number   // minutes
+    longBreakInterval: number   // number of pomodoros before long break
+    autoStartNextPomodoro: boolean
+    autoStartBreak: boolean
+    disableBreak: boolean
+    darkMode: 'system' | 'on' | 'off'
+    theme: string
+    addTaskOnTop: boolean
+    dailyGoalMinutes: number    // daily focus goal in minutes
+}
+
+export type SmartView = 'today' | 'tomorrow' | 'week' | 'next7' | 'high' | 'planned' | 'completed' | 'all'
+
+// ==================== Constants ====================
+const LIST_COLORS = [
+    '#E53935', '#D81B60', '#8E24AA', '#5E35B1',
+    '#3949AB', '#1E88E5', '#00ACC1', '#00897B',
+    '#43A047', '#7CB342', '#C0CA33', '#FDD835',
+    '#FFB300', '#FB8C00', '#6D4C41', '#757575',
+]
+
+const DEFAULT_SETTINGS: FocusSettings = {
+    pomodoroDuration: 25,
+    shortBreakDuration: 5,
+    longBreakDuration: 15,
+    longBreakInterval: 4,
+    autoStartNextPomodoro: false,
+    autoStartBreak: true,
+    disableBreak: false,
+    darkMode: 'off',
+    theme: 'starry',
+    addTaskOnTop: true,
+    dailyGoalMinutes: 180,
+}
+
+const SMART_VIEWS: { key: SmartView; label: string; icon: string }[] = [
+    { key: 'today', label: '今天', icon: '☀️' },
+    { key: 'tomorrow', label: '明天', icon: '🌅' },
+    { key: 'week', label: '本周', icon: '📅' },
+    { key: 'next7', label: '未来7天', icon: '📆' },
+    { key: 'high', label: '高优先级', icon: '🔥' },
+    { key: 'planned', label: '已计划', icon: '📋' },
+    { key: 'completed', label: '已完成', icon: '✅' },
+    { key: 'all', label: '全部任务', icon: '📝' },
+]
+
+// ==================== Helpers ====================
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+
+const todayStr = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const tomorrowStr = () => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const getWeekRange = () => {
+    const now = new Date()
+    const day = now.getDay()
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1))
+    monday.setHours(0, 0, 0, 0)
+    const sunday = new Date(monday)
+    sunday.setDate(monday.getDate() + 6)
+    sunday.setHours(23, 59, 59, 999)
+    return { start: monday, end: sunday }
+}
+
+const getNext7Range = () => {
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const end = new Date(now)
+    end.setDate(now.getDate() + 7)
+    end.setHours(23, 59, 59, 999)
+    return { start: now, end }
+}
+
+const dateInRange = (dateStr: string, start: Date, end: Date) => {
+    const d = new Date(dateStr + 'T00:00:00')
+    return d >= start && d <= end
+}
+
+// ==================== Store Singleton ====================
+let _store: ReturnType<typeof createFocusStore> | null = null
+
+function createFocusStore() {
+    // --- Load from localStorage ---
+    function loadJSON<T>(key: string, fallback: T): T {
+        if (typeof window === 'undefined') return fallback
+        try {
+            const raw = localStorage.getItem(key)
+            return raw ? JSON.parse(raw) : fallback
+        } catch { return fallback }
+    }
+
+    // --- Reactive State ---
+    const tasks: Ref<FocusTask[]> = ref(loadJSON('focus_tasks', []))
+    const lists: Ref<FocusList[]> = ref(loadJSON('focus_lists', [
+        { id: 'default', name: '默认清单', color: '#1E88E5', order: 0, createdAt: Date.now() }
+    ]))
+    const folders: Ref<FocusFolder[]> = ref(loadJSON('focus_folders', []))
+    const records: Ref<PomodoroRecord[]> = ref(loadJSON('focus_records', []))
+    const settings: Ref<FocusSettings> = ref(loadJSON('focus_settings', { ...DEFAULT_SETTINGS }))
+
+    // UI state
+    const currentView = ref<SmartView | string>(loadJSON('focus_view', 'today'))
+    const selectedTaskId = ref<string | null>(null)
+    const showCompletedTasks = ref(true)
+
+    // --- Persistence ---
+    watch(tasks, v => localStorage.setItem('focus_tasks', JSON.stringify(v)), { deep: true })
+    watch(lists, v => localStorage.setItem('focus_lists', JSON.stringify(v)), { deep: true })
+    watch(folders, v => localStorage.setItem('focus_folders', JSON.stringify(v)), { deep: true })
+    watch(records, v => localStorage.setItem('focus_records', JSON.stringify(v)), { deep: true })
+    watch(settings, v => localStorage.setItem('focus_settings', JSON.stringify(v)), { deep: true })
+    watch(currentView, v => localStorage.setItem('focus_view', JSON.stringify(v)))
+
+    // --- Computed ---
+    const selectedTask = computed(() =>
+        selectedTaskId.value ? tasks.value.find(t => t.id === selectedTaskId.value) ?? null : null
+    )
+
+    const currentListName = computed(() => {
+        const sv = SMART_VIEWS.find(s => s.key === currentView.value)
+        if (sv) return sv.label
+        const list = lists.value.find(l => l.id === currentView.value)
+        return list?.name ?? '任务'
+    })
+
+    const filteredTasks = computed(() => {
+        const view = currentView.value
+        const today = todayStr()
+        const tomorrow = tomorrowStr()
+        const weekRange = getWeekRange()
+        const next7 = getNext7Range()
+
+        let filtered: FocusTask[]
+
+        switch (view) {
+            case 'today':
+                filtered = tasks.value.filter(t => !t.completed && t.dueDate === today)
+                break
+            case 'tomorrow':
+                filtered = tasks.value.filter(t => !t.completed && t.dueDate === tomorrow)
+                break
+            case 'week':
+                filtered = tasks.value.filter(t => !t.completed && t.dueDate && dateInRange(t.dueDate, weekRange.start, weekRange.end))
+                break
+            case 'next7':
+                filtered = tasks.value.filter(t => !t.completed && t.dueDate && dateInRange(t.dueDate, next7.start, next7.end))
+                break
+            case 'high':
+                filtered = tasks.value.filter(t => !t.completed && t.priority === 'high')
+                break
+            case 'planned':
+                filtered = tasks.value.filter(t => !t.completed && t.dueDate)
+                break
+            case 'completed':
+                filtered = tasks.value.filter(t => t.completed)
+                break
+            case 'all':
+                filtered = tasks.value.filter(t => !t.completed)
+                break
+            default:
+                // Custom list
+                filtered = tasks.value.filter(t => !t.completed && t.listId === view)
+        }
+
+        return filtered.sort((a, b) => a.order - b.order)
+    })
+
+    const completedTasks = computed(() => {
+        const view = currentView.value
+        if (view === 'completed') return []
+        if (SMART_VIEWS.some(s => s.key === view)) {
+            return tasks.value.filter(t => t.completed).sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
+        }
+        return tasks.value.filter(t => t.completed && t.listId === view).sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
+    })
+
+    // Stats
+    const todayRecords = computed(() => {
+        const start = new Date()
+        start.setHours(0, 0, 0, 0)
+        return records.value.filter(r => r.startTime >= start.getTime())
+    })
+
+    const stats = computed(() => {
+        const pending = filteredTasks.value.length
+        const completed = completedTasks.value.length
+        const estimatedMinutes = filteredTasks.value.reduce((acc, t) => acc + t.pomodoroEstimate * settings.value.pomodoroDuration, 0)
+        const focusedSeconds = todayRecords.value.reduce((acc, r) => acc + r.duration, 0)
+        return {
+            pending,
+            completed,
+            estimatedMinutes,
+            focusedMinutes: Math.floor(focusedSeconds / 60),
+        }
+    })
+
+    // List counts
+    const listTaskCounts = computed(() => {
+        const counts: Record<string, number> = {}
+        for (const t of tasks.value) {
+            if (!t.completed) {
+                counts[t.listId] = (counts[t.listId] ?? 0) + 1
+            }
+        }
+        return counts
+    })
+
+    const smartViewCounts = computed(() => {
+        const today = todayStr()
+        const tomorrow = tomorrowStr()
+        const weekRange = getWeekRange()
+        const next7 = getNext7Range()
+        const activeTasks = tasks.value.filter(t => !t.completed)
+
+        return {
+            today: activeTasks.filter(t => t.dueDate === today).length,
+            tomorrow: activeTasks.filter(t => t.dueDate === tomorrow).length,
+            week: activeTasks.filter(t => t.dueDate && dateInRange(t.dueDate, weekRange.start, weekRange.end)).length,
+            next7: activeTasks.filter(t => t.dueDate && dateInRange(t.dueDate, next7.start, next7.end)).length,
+            high: activeTasks.filter(t => t.priority === 'high').length,
+            planned: activeTasks.filter(t => t.dueDate).length,
+            completed: tasks.value.filter(t => t.completed).length,
+            all: activeTasks.length,
+        }
+    })
+
+    // --- Actions ---
+    function addTask(name: string, listId?: string) {
+        const task: FocusTask = {
+            id: uid(),
+            name,
+            completed: false,
+            listId: listId ?? (SMART_VIEWS.some(s => s.key === currentView.value) ? 'default' : currentView.value as string),
+            pomodoroEstimate: 1,
+            pomodoroCompleted: 0,
+            priority: 'none',
+            dueDate: currentView.value === 'today' ? todayStr() : currentView.value === 'tomorrow' ? tomorrowStr() : undefined,
+            notes: '',
+            createdAt: Date.now(),
+            order: settings.value.addTaskOnTop ? -Date.now() : Date.now(),
+        }
+        tasks.value.push(task)
+        return task
+    }
+
+    function updateTask(id: string, updates: Partial<FocusTask>) {
+        const idx = tasks.value.findIndex(t => t.id === id)
+        if (idx >= 0) {
+            tasks.value[idx] = { ...tasks.value[idx], ...updates }
+        }
+    }
+
+    function toggleTask(id: string) {
+        const task = tasks.value.find(t => t.id === id)
+        if (task) {
+            task.completed = !task.completed
+            task.completedAt = task.completed ? Date.now() : undefined
+        }
+    }
+
+    function deleteTask(id: string) {
+        tasks.value = tasks.value.filter(t => t.id !== id)
+        if (selectedTaskId.value === id) selectedTaskId.value = null
+    }
+
+    function addList(name: string, color: string) {
+        const list: FocusList = {
+            id: uid(),
+            name,
+            color,
+            order: Date.now(),
+            createdAt: Date.now(),
+        }
+        lists.value.push(list)
+        return list
+    }
+
+    function updateList(id: string, updates: Partial<FocusList>) {
+        const idx = lists.value.findIndex(l => l.id === id)
+        if (idx >= 0) {
+            lists.value[idx] = { ...lists.value[idx], ...updates }
+        }
+    }
+
+    function deleteList(id: string) {
+        lists.value = lists.value.filter(l => l.id !== id)
+        // Move tasks to default
+        tasks.value.forEach(t => { if (t.listId === id) t.listId = 'default' })
+        if (currentView.value === id) currentView.value = 'all'
+    }
+
+    function addFolder(name: string) {
+        const folder: FocusFolder = { id: uid(), name, collapsed: false, order: Date.now() }
+        folders.value.push(folder)
+        return folder
+    }
+
+    function addRecord(record: Omit<PomodoroRecord, 'id'>) {
+        records.value.push({ ...record, id: uid() })
+    }
+
+    function updateSettings(updates: Partial<FocusSettings>) {
+        settings.value = { ...settings.value, ...updates }
+    }
+
+    // --- Report Data ---
+    function getRecordsInRange(startTime: number, endTime: number) {
+        return records.value.filter(r => r.startTime >= startTime && r.startTime < endTime)
+    }
+
+    const totalFocusMinutes = computed(() =>
+        Math.floor(records.value.reduce((acc, r) => acc + r.duration, 0) / 60)
+    )
+
+    const weekFocusMinutes = computed(() => {
+        const { start, end } = getWeekRange()
+        return Math.floor(getRecordsInRange(start.getTime(), end.getTime()).reduce((acc, r) => acc + r.duration, 0) / 60)
+    })
+
+    const todayFocusMinutes = computed(() => {
+        const start = new Date()
+        start.setHours(0, 0, 0, 0)
+        return Math.floor(getRecordsInRange(start.getTime(), Date.now()).reduce((acc, r) => acc + r.duration, 0) / 60)
+    })
+
+    const totalCompletedTasks = computed(() => tasks.value.filter(t => t.completed).length)
+    const weekCompletedTasks = computed(() => {
+        const { start, end } = getWeekRange()
+        return tasks.value.filter(t => t.completed && t.completedAt && t.completedAt >= start.getTime() && t.completedAt <= end.getTime()).length
+    })
+    const todayCompletedTasks = computed(() => {
+        const start = new Date()
+        start.setHours(0, 0, 0, 0)
+        return tasks.value.filter(t => t.completed && t.completedAt && t.completedAt >= start.getTime()).length
+    })
+
+    // Heatmap data: returns 24*7 grid with focus minutes
+    function getHeatmapData() {
+        const data: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0))
+        const { start } = getWeekRange()
+        const weekRecords = getRecordsInRange(start.getTime(), start.getTime() + 7 * 24 * 3600000)
+        for (const r of weekRecords) {
+            const d = new Date(r.startTime)
+            const day = (d.getDay() + 6) % 7 // 0=Monday
+            const hour = d.getHours()
+            data[day][hour] += Math.round(r.duration / 60)
+        }
+        return data
+    }
+
+    // Focus ranking by task
+    function getFocusRanking(periodStart: number, periodEnd: number) {
+        const recs = getRecordsInRange(periodStart, periodEnd)
+        const map: Record<string, { name: string; minutes: number }> = {}
+        for (const r of recs) {
+            if (!map[r.taskId]) map[r.taskId] = { name: r.taskName, minutes: 0 }
+            map[r.taskId].minutes += Math.round(r.duration / 60)
+        }
+        return Object.entries(map)
+            .map(([id, v]) => ({ taskId: id, ...v }))
+            .sort((a, b) => b.minutes - a.minutes)
+    }
+
+    // List distribution
+    function getListDistribution(periodStart: number, periodEnd: number) {
+        const recs = getRecordsInRange(periodStart, periodEnd)
+        const map: Record<string, number> = {}
+        for (const r of recs) {
+            map[r.listId] = (map[r.listId] ?? 0) + Math.round(r.duration / 60)
+        }
+        return Object.entries(map).map(([listId, minutes]) => {
+            const list = lists.value.find(l => l.id === listId)
+            return { listId, name: list?.name ?? '已删除', color: list?.color ?? '#757575', minutes }
+        }).sort((a, b) => b.minutes - a.minutes)
+    }
+
+    return {
+        // State
+        tasks, lists, folders, records, settings,
+        currentView, selectedTaskId, showCompletedTasks,
+        // Computed
+        selectedTask, currentListName, filteredTasks, completedTasks,
+        stats, listTaskCounts, smartViewCounts,
+        totalFocusMinutes, weekFocusMinutes, todayFocusMinutes,
+        totalCompletedTasks, weekCompletedTasks, todayCompletedTasks,
+        todayRecords,
+        // Constants
+        SMART_VIEWS, LIST_COLORS,
+        // Actions
+        addTask, updateTask, toggleTask, deleteTask,
+        addList, updateList, deleteList,
+        addFolder, addRecord, updateSettings,
+        // Report helpers
+        getHeatmapData, getFocusRanking, getListDistribution, getRecordsInRange,
+    }
+}
+
+export function useFocusStore() {
+    if (!_store) {
+        _store = createFocusStore()
+    }
+    return _store
+}

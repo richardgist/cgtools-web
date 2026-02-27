@@ -1,0 +1,1659 @@
+/* ==============================================
+   专注清单 (Focus To-Do) CSS Design System
+   ============================================== */
+
+/* --- CSS Variables --- */
+:root {
+  /* Brand Colors */
+  --focus-red: #E53935;
+  --focus-red-light: #FF6F61;
+  --focus-red-dark: #C62828;
+  --focus-blue: #1E88E5;
+  --focus-blue-light: #42A5F5;
+  --focus-green: #43A047;
+  --focus-green-light: #66BB6A;
+  --focus-orange: #FB8C00;
+  --focus-purple: #7E57C2;
+
+  /* Neutral Colors */
+  --focus-bg: #F5F5F5;
+  --focus-surface: #FFFFFF;
+  --focus-surface-hover: #FAFAFA;
+  --focus-border: #E8E8E8;
+  --focus-border-light: #F0F0F0;
+  --focus-text: #1A1A1A;
+  --focus-text-secondary: #666666;
+  --focus-text-muted: #999999;
+  --focus-text-disabled: #CCCCCC;
+
+  /* Sidebar */
+  --focus-sidebar-bg: #FAFAFA;
+  --focus-sidebar-hover: #F0F0F0;
+  --focus-sidebar-active: #FFEBEE;
+  --focus-sidebar-active-text: var(--focus-red);
+  --focus-sidebar-width: 240px;
+
+  /* Spacing */
+  --focus-spacing-xs: 4px;
+  --focus-spacing-sm: 8px;
+  --focus-spacing-md: 12px;
+  --focus-spacing-lg: 16px;
+  --focus-spacing-xl: 24px;
+  --focus-spacing-xxl: 32px;
+
+  /* Border Radius */
+  --focus-radius-sm: 4px;
+  --focus-radius-md: 8px;
+  --focus-radius-lg: 12px;
+  --focus-radius-xl: 16px;
+  --focus-radius-round: 999px;
+
+  /* Shadows */
+  --focus-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --focus-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --focus-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --focus-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.16);
+
+  /* Transitions */
+  --focus-transition-fast: 150ms ease;
+  --focus-transition-normal: 250ms ease;
+  --focus-transition-slow: 350ms ease;
+
+  /* Font */
+  --focus-font: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  --focus-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Timer */
+  --focus-timer-size: 280px;
+}
+
+/* --- Dark Mode Variables --- */
+.focus-dark {
+  --focus-bg: #121212;
+  --focus-surface: #1E1E1E;
+  --focus-surface-hover: #2A2A2A;
+  --focus-border: #333333;
+  --focus-border-light: #2A2A2A;
+  --focus-text: #E8E8E8;
+  --focus-text-secondary: #AAAAAA;
+  --focus-text-muted: #777777;
+  --focus-text-disabled: #555555;
+  --focus-sidebar-bg: #1A1A1A;
+  --focus-sidebar-hover: #262626;
+  --focus-sidebar-active: #3D1A1A;
+  --focus-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --focus-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --focus-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --focus-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+/* --- List Colors (16 colors) --- */
+.list-color-red {
+  --list-color: #E53935;
+}
+
+.list-color-pink {
+  --list-color: #D81B60;
+}
+
+.list-color-purple {
+  --list-color: #8E24AA;
+}
+
+.list-color-deep-purple {
+  --list-color: #5E35B1;
+}
+
+.list-color-indigo {
+  --list-color: #3949AB;
+}
+
+.list-color-blue {
+  --list-color: #1E88E5;
+}
+
+.list-color-cyan {
+  --list-color: #00ACC1;
+}
+
+.list-color-teal {
+  --list-color: #00897B;
+}
+
+.list-color-green {
+  --list-color: #43A047;
+}
+
+.list-color-light-green {
+  --list-color: #7CB342;
+}
+
+.list-color-lime {
+  --list-color: #C0CA33;
+}
+
+.list-color-yellow {
+  --list-color: #FDD835;
+}
+
+.list-color-amber {
+  --list-color: #FFB300;
+}
+
+.list-color-orange {
+  --list-color: #FB8C00;
+}
+
+.list-color-brown {
+  --list-color: #6D4C41;
+}
+
+.list-color-gray {
+  --list-color: #757575;
+}
+
+/* --- Animations --- */
+@keyframes focus-fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes focus-fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes focus-scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes focus-slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes focus-checkmark {
+  0% {
+    transform: scale(0);
+  }
+
+  50% {
+    transform: scale(1.2);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes focus-strikethrough {
+  from {
+    width: 0;
+  }
+
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes focus-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes focus-timerRing {
+  from {
+    stroke-dashoffset: var(--ring-circumference);
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* --- Base Layout --- */
+.focus-app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  font-family: var(--focus-font);
+  background: var(--focus-bg);
+  color: var(--focus-text);
+  overflow: hidden;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+/* --- Sidebar --- */
+.focus-sidebar {
+  width: var(--focus-sidebar-width);
+  min-width: var(--focus-sidebar-width);
+  background: var(--focus-sidebar-bg);
+  border-right: 1px solid var(--focus-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.focus-sidebar__header {
+  padding: var(--focus-spacing-lg) var(--focus-spacing-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+}
+
+.focus-sidebar__logo {
+  width: 28px;
+  height: 28px;
+  background: var(--focus-red);
+  border-radius: var(--focus-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 14px;
+}
+
+.focus-sidebar__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--focus-text);
+}
+
+.focus-sidebar__nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--focus-spacing-sm) var(--focus-spacing-sm);
+}
+
+.focus-sidebar__section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--focus-text-muted);
+  padding: var(--focus-spacing-lg) var(--focus-spacing-md) var(--focus-spacing-xs);
+}
+
+.focus-sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  padding: var(--focus-spacing-sm) var(--focus-spacing-md);
+  border-radius: var(--focus-radius-md);
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+  font-size: 13px;
+  color: var(--focus-text-secondary);
+  position: relative;
+  user-select: none;
+}
+
+.focus-sidebar__item:hover {
+  background: var(--focus-sidebar-hover);
+  color: var(--focus-text);
+}
+
+.focus-sidebar__item.active {
+  background: var(--focus-sidebar-active);
+  color: var(--focus-sidebar-active-text);
+  font-weight: 600;
+}
+
+.focus-sidebar__item-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.focus-sidebar__item-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--focus-text-muted);
+  min-width: 18px;
+  text-align: center;
+}
+
+.focus-sidebar__list-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.focus-sidebar__footer {
+  padding: var(--focus-spacing-md);
+  border-top: 1px solid var(--focus-border);
+}
+
+.focus-sidebar__create-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  width: 100%;
+  padding: var(--focus-spacing-sm) var(--focus-spacing-md);
+  border: none;
+  background: transparent;
+  color: var(--focus-text-muted);
+  cursor: pointer;
+  border-radius: var(--focus-radius-md);
+  font-size: 13px;
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-sidebar__create-btn:hover {
+  background: var(--focus-sidebar-hover);
+  color: var(--focus-red);
+}
+
+/* --- Main Content --- */
+.focus-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--focus-bg);
+}
+
+/* --- Stats Cards --- */
+.focus-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--focus-spacing-md);
+  padding: var(--focus-spacing-lg) var(--focus-spacing-xl);
+  animation: focus-fadeInUp 0.4s ease;
+}
+
+.focus-stats__card {
+  background: var(--focus-surface);
+  border-radius: var(--focus-radius-lg);
+  padding: var(--focus-spacing-lg);
+  box-shadow: var(--focus-shadow-sm);
+  transition: all var(--focus-transition-normal);
+  border: 1px solid var(--focus-border-light);
+}
+
+.focus-stats__card:hover {
+  box-shadow: var(--focus-shadow-md);
+  transform: translateY(-2px);
+}
+
+.focus-stats__label {
+  font-size: 12px;
+  color: var(--focus-text-muted);
+  margin-bottom: var(--focus-spacing-xs);
+}
+
+.focus-stats__value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--focus-text);
+  line-height: 1.2;
+}
+
+.focus-stats__value--red {
+  color: var(--focus-red);
+}
+
+.focus-stats__value--blue {
+  color: var(--focus-blue);
+}
+
+.focus-stats__value--green {
+  color: var(--focus-green);
+}
+
+.focus-stats__value--orange {
+  color: var(--focus-orange);
+}
+
+/* --- Task Input --- */
+.focus-task-input {
+  padding: 0 var(--focus-spacing-xl);
+  margin-bottom: var(--focus-spacing-md);
+}
+
+.focus-task-input__wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  background: var(--focus-surface);
+  border: 2px solid var(--focus-border);
+  border-radius: var(--focus-radius-lg);
+  padding: var(--focus-spacing-sm) var(--focus-spacing-lg);
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-task-input__wrapper:focus-within {
+  border-color: var(--focus-red);
+  box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.1);
+}
+
+.focus-task-input__field {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  background: transparent;
+  color: var(--focus-text);
+  font-family: var(--focus-font);
+  padding: var(--focus-spacing-sm) 0;
+}
+
+.focus-task-input__field::placeholder {
+  color: var(--focus-text-disabled);
+}
+
+.focus-task-input__actions {
+  display: flex;
+  gap: var(--focus-spacing-xs);
+}
+
+.focus-task-input__btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: var(--focus-radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--focus-text-muted);
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-task-input__btn:hover {
+  background: var(--focus-sidebar-hover);
+  color: var(--focus-red);
+}
+
+/* --- Task List --- */
+.focus-tasks {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--focus-spacing-xl) var(--focus-spacing-xl);
+}
+
+.focus-tasks__section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--focus-text-muted);
+  padding: var(--focus-spacing-md) 0 var(--focus-spacing-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  cursor: pointer;
+  user-select: none;
+}
+
+.focus-tasks__section-title svg {
+  transition: transform var(--focus-transition-fast);
+}
+
+.focus-tasks__section-title.collapsed svg {
+  transform: rotate(-90deg);
+}
+
+/* --- Task Item --- */
+.focus-task-item {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-md);
+  padding: var(--focus-spacing-md) var(--focus-spacing-lg);
+  background: var(--focus-surface);
+  border-radius: var(--focus-radius-md);
+  margin-bottom: var(--focus-spacing-xs);
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+  border: 1px solid transparent;
+  animation: focus-fadeInUp 0.3s ease;
+}
+
+.focus-task-item:hover {
+  border-color: var(--focus-border);
+  box-shadow: var(--focus-shadow-sm);
+}
+
+.focus-task-item.active {
+  border-color: var(--focus-red);
+  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.1);
+}
+
+.focus-task-item.completed {
+  opacity: 0.6;
+}
+
+.focus-task-item.completed .focus-task-item__name {
+  text-decoration: line-through;
+  color: var(--focus-text-muted);
+}
+
+/* Task checkbox */
+.focus-task-item__check {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--focus-border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-task-item__check:hover {
+  border-color: var(--focus-green);
+  background: rgba(67, 160, 71, 0.06);
+}
+
+.focus-task-item__check.checked {
+  background: var(--focus-green);
+  border-color: var(--focus-green);
+  animation: focus-checkmark 0.3s ease;
+}
+
+.focus-task-item__check.checked svg {
+  color: white;
+}
+
+.focus-task-item__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.focus-task-item__name {
+  font-size: 14px;
+  color: var(--focus-text);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-task-item__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  margin-top: 2px;
+}
+
+.focus-task-item__pomodoro {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--focus-red);
+}
+
+.focus-task-item__date {
+  font-size: 11px;
+  color: var(--focus-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.focus-task-item__date.overdue {
+  color: var(--focus-red);
+}
+
+.focus-task-item__priority {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.focus-task-item__priority.high {
+  background: var(--focus-red);
+}
+
+.focus-task-item__priority.medium {
+  background: var(--focus-orange);
+}
+
+.focus-task-item__priority.low {
+  background: var(--focus-blue);
+}
+
+/* Running task state */
+.focus-task-item--running {
+  border-color: var(--focus-red) !important;
+  background: linear-gradient(135deg, rgba(229, 57, 53, 0.06), rgba(229, 57, 53, 0.02)) !important;
+  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.12);
+}
+
+.focus-task-item__running-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 16px;
+  animation: focus-pulse 1.5s ease-in-out infinite;
+}
+
+.focus-task-item__timer {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--focus-font-mono);
+  color: var(--focus-red);
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+
+.focus-task-item__status {
+  font-size: 11px;
+  color: white;
+  background: var(--focus-red);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+/* --- Task Detail Panel --- */
+.focus-detail {
+  width: 320px;
+  min-width: 320px;
+  background: var(--focus-surface);
+  border-left: 1px solid var(--focus-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: focus-slideInLeft 0.25s ease;
+}
+
+.focus-detail__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--focus-spacing-lg);
+  border-bottom: 1px solid var(--focus-border-light);
+}
+
+.focus-detail__close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: var(--focus-radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--focus-text-muted);
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-detail__close:hover {
+  background: var(--focus-sidebar-hover);
+  color: var(--focus-text);
+}
+
+.focus-detail__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--focus-spacing-lg);
+}
+
+.focus-detail__field {
+  margin-bottom: var(--focus-spacing-lg);
+}
+
+.focus-detail__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--focus-text-muted);
+  margin-bottom: var(--focus-spacing-xs);
+}
+
+.focus-detail__input {
+  width: 100%;
+  padding: var(--focus-spacing-sm) var(--focus-spacing-md);
+  border: 1px solid var(--focus-border);
+  border-radius: var(--focus-radius-md);
+  font-size: 14px;
+  background: var(--focus-bg);
+  color: var(--focus-text);
+  font-family: var(--focus-font);
+  transition: all var(--focus-transition-fast);
+  outline: none;
+}
+
+.focus-detail__input:focus {
+  border-color: var(--focus-red);
+  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.1);
+}
+
+.focus-detail__textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* --- Pomodoro Counter in Detail --- */
+.focus-pomodoro-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+}
+
+.focus-pomodoro-selector__btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--focus-border);
+  background: var(--focus-surface);
+  border-radius: var(--focus-radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--focus-text-secondary);
+  transition: all var(--focus-transition-fast);
+  font-size: 14px;
+}
+
+.focus-pomodoro-selector__btn:hover {
+  border-color: var(--focus-red);
+  color: var(--focus-red);
+}
+
+.focus-pomodoro-selector__count {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--focus-red);
+  min-width: 24px;
+  text-align: center;
+}
+
+/* --- Pomodoro Timer (Fullscreen) --- */
+.focus-timer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: focus-fadeIn 0.4s ease;
+}
+
+.focus-timer-overlay__bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: brightness(0.5);
+}
+
+.focus-timer-overlay__content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--focus-spacing-xl);
+  color: white;
+  text-align: center;
+}
+
+.focus-timer__task-name {
+  font-size: 18px;
+  font-weight: 500;
+  opacity: 0.9;
+  max-width: 400px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-timer__circle {
+  width: var(--focus-timer-size);
+  height: var(--focus-timer-size);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.focus-timer__svg {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+}
+
+.focus-timer__track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.15);
+  stroke-width: 4;
+}
+
+.focus-timer__progress {
+  fill: none;
+  stroke: var(--focus-red);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+
+.focus-timer__time {
+  font-size: 56px;
+  font-weight: 300;
+  font-family: var(--focus-font-mono);
+  letter-spacing: 2px;
+  color: white;
+}
+
+.focus-timer__label {
+  font-size: 14px;
+  opacity: 0.7;
+  margin-top: -8px;
+}
+
+.focus-timer__controls {
+  display: flex;
+  gap: var(--focus-spacing-lg);
+}
+
+.focus-timer__btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--focus-transition-fast);
+  font-size: 20px;
+}
+
+.focus-timer__btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.08);
+}
+
+.focus-timer__btn--primary {
+  width: 64px;
+  height: 64px;
+  background: var(--focus-red);
+  border-color: var(--focus-red);
+}
+
+.focus-timer__btn--primary:hover {
+  background: var(--focus-red-dark);
+  border-color: var(--focus-red-dark);
+}
+
+/* Timer sidebar */
+.focus-timer__sidebar {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 300px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(16px);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  padding: var(--focus-spacing-xl);
+  animation: focus-slideInLeft 0.3s ease;
+}
+
+.focus-timer__sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: var(--focus-spacing-lg);
+}
+
+.focus-timer__sidebar-task {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  padding: var(--focus-spacing-sm) var(--focus-spacing-md);
+  border-radius: var(--focus-radius-md);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-timer__sidebar-task:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.focus-timer__sidebar-task.active {
+  background: rgba(229, 57, 53, 0.3);
+  color: white;
+}
+
+/* --- Top bar in timer --- */
+.focus-timer__topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1002;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--focus-spacing-lg) var(--focus-spacing-xl);
+}
+
+.focus-timer__topbar-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  border-radius: var(--focus-radius-md);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-timer__topbar-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* --- Mini Timer Bar (background running indicator) --- */
+.focus-mini-timer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 24px 12px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--focus-red), #c62828);
+  border-radius: var(--focus-radius-lg);
+  color: white;
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(229, 57, 53, 0.3);
+}
+
+.focus-mini-timer:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(229, 57, 53, 0.45);
+}
+
+.focus-mini-timer__pulse {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: white;
+  animation: focus-pulse 1.5s ease-in-out infinite;
+  border-radius: 0 2px 2px 0;
+}
+
+.focus-mini-timer__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.focus-mini-timer__task {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-mini-timer__time {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--focus-font-mono);
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+.focus-mini-timer__label {
+  font-size: 11px;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.focus-mini-timer__stop {
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-mini-timer__stop:hover {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: white;
+}
+
+/* --- Dialog/Modal --- */
+.focus-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  animation: focus-fadeIn 0.2s ease;
+}
+
+.focus-dialog {
+  background: var(--focus-surface);
+  border-radius: var(--focus-radius-xl);
+  box-shadow: var(--focus-shadow-xl);
+  max-width: 600px;
+  width: 90%;
+  max-height: 85vh;
+  overflow: hidden;
+  animation: focus-scaleIn 0.25s ease;
+}
+
+.focus-dialog--large {
+  max-width: 800px;
+}
+
+.focus-dialog--xl {
+  max-width: 960px;
+}
+
+.focus-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--focus-spacing-lg) var(--focus-spacing-xl);
+  border-bottom: 1px solid var(--focus-border-light);
+}
+
+.focus-dialog__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--focus-text);
+}
+
+.focus-dialog__close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: var(--focus-radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--focus-text-muted);
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-dialog__close:hover {
+  background: var(--focus-sidebar-hover);
+  color: var(--focus-text);
+}
+
+.focus-dialog__body {
+  padding: var(--focus-spacing-xl);
+  overflow-y: auto;
+  max-height: 65vh;
+}
+
+.focus-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--focus-spacing-sm);
+  padding: var(--focus-spacing-lg) var(--focus-spacing-xl);
+  border-top: 1px solid var(--focus-border-light);
+}
+
+/* --- Buttons --- */
+.focus-btn {
+  padding: var(--focus-spacing-sm) var(--focus-spacing-lg);
+  border: none;
+  border-radius: var(--focus-radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  font-family: var(--focus-font);
+}
+
+.focus-btn--primary {
+  background: var(--focus-red);
+  color: white;
+}
+
+.focus-btn--primary:hover {
+  background: var(--focus-red-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(229, 57, 53, 0.3);
+}
+
+.focus-btn--secondary {
+  background: var(--focus-bg);
+  color: var(--focus-text-secondary);
+  border: 1px solid var(--focus-border);
+}
+
+.focus-btn--secondary:hover {
+  background: var(--focus-surface-hover);
+  color: var(--focus-text);
+}
+
+.focus-btn--ghost {
+  background: transparent;
+  color: var(--focus-text-secondary);
+}
+
+.focus-btn--ghost:hover {
+  background: var(--focus-sidebar-hover);
+  color: var(--focus-text);
+}
+
+/* --- Settings Tabs --- */
+.focus-settings__tabs {
+  display: flex;
+  border-bottom: 1px solid var(--focus-border-light);
+  padding: 0 var(--focus-spacing-xl);
+  gap: var(--focus-spacing-xl);
+}
+
+.focus-settings__tab {
+  padding: var(--focus-spacing-md) 0;
+  font-size: 13px;
+  color: var(--focus-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all var(--focus-transition-fast);
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  font-family: var(--focus-font);
+}
+
+.focus-settings__tab:hover {
+  color: var(--focus-text);
+}
+
+.focus-settings__tab.active {
+  color: var(--focus-red);
+  border-bottom-color: var(--focus-red);
+  font-weight: 600;
+}
+
+.focus-settings__group {
+  margin-bottom: var(--focus-spacing-xl);
+}
+
+.focus-settings__group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--focus-text);
+  margin-bottom: var(--focus-spacing-md);
+}
+
+.focus-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--focus-spacing-md) 0;
+  border-bottom: 1px solid var(--focus-border-light);
+}
+
+.focus-settings__row-label {
+  font-size: 13px;
+  color: var(--focus-text-secondary);
+}
+
+.focus-settings__row-value {
+  font-size: 13px;
+  color: var(--focus-text);
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+}
+
+/* --- Toggle Switch --- */
+.focus-toggle {
+  width: 40px;
+  height: 22px;
+  background: var(--focus-border);
+  border-radius: var(--focus-radius-round);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-toggle.active {
+  background: var(--focus-red);
+}
+
+.focus-toggle__knob {
+  width: 18px;
+  height: 18px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: all var(--focus-transition-fast);
+  box-shadow: var(--focus-shadow-sm);
+}
+
+.focus-toggle.active .focus-toggle__knob {
+  left: 20px;
+}
+
+/* --- Number Stepper --- */
+.focus-stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-sm);
+  border: 1px solid var(--focus-border);
+  border-radius: var(--focus-radius-md);
+  overflow: hidden;
+}
+
+.focus-stepper__btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--focus-text-secondary);
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-stepper__btn:hover {
+  background: var(--focus-sidebar-hover);
+  color: var(--focus-red);
+}
+
+.focus-stepper__value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--focus-text);
+  min-width: 32px;
+  text-align: center;
+}
+
+/* --- White Noise Panel --- */
+.focus-noise {
+  padding: var(--focus-spacing-lg);
+}
+
+.focus-noise__volume {
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-md);
+  margin-bottom: var(--focus-spacing-lg);
+}
+
+.focus-noise__slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--focus-border);
+  outline: none;
+}
+
+.focus-noise__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--focus-red);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.focus-noise__list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--focus-spacing-sm);
+}
+
+.focus-noise__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--focus-spacing-xs);
+  padding: var(--focus-spacing-md);
+  border-radius: var(--focus-radius-md);
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+  font-size: 11px;
+  color: var(--focus-text-secondary);
+  border: 1px solid transparent;
+}
+
+.focus-noise__item:hover {
+  background: var(--focus-surface-hover);
+  border-color: var(--focus-border);
+}
+
+.focus-noise__item.active {
+  background: var(--focus-sidebar-active);
+  border-color: var(--focus-red);
+  color: var(--focus-red);
+}
+
+.focus-noise__item-icon {
+  font-size: 20px;
+}
+
+/* --- Stats / Reports --- */
+.focus-report__cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--focus-spacing-md);
+  margin-bottom: var(--focus-spacing-xl);
+}
+
+.focus-report__card {
+  background: var(--focus-bg);
+  border-radius: var(--focus-radius-lg);
+  padding: var(--focus-spacing-lg);
+  text-align: center;
+}
+
+.focus-report__card-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--focus-red);
+}
+
+.focus-report__card-label {
+  font-size: 12px;
+  color: var(--focus-text-muted);
+  margin-top: var(--focus-spacing-xs);
+}
+
+.focus-report__section {
+  margin-bottom: var(--focus-spacing-xl);
+}
+
+.focus-report__section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--focus-text);
+  margin-bottom: var(--focus-spacing-md);
+}
+
+/* Heatmap */
+.focus-heatmap {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.focus-heatmap__cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--focus-border-light);
+}
+
+.focus-heatmap__cell--l1 {
+  background: #FFCDD2;
+}
+
+.focus-heatmap__cell--l2 {
+  background: #EF9A9A;
+}
+
+.focus-heatmap__cell--l3 {
+  background: #EF5350;
+}
+
+.focus-heatmap__cell--l4 {
+  background: #C62828;
+}
+
+/* Calendar */
+.focus-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--focus-spacing-xs);
+}
+
+.focus-calendar__day-header {
+  font-size: 11px;
+  color: var(--focus-text-muted);
+  text-align: center;
+  padding: var(--focus-spacing-xs);
+}
+
+.focus-calendar__day {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--focus-text-secondary);
+  margin: 0 auto;
+}
+
+.focus-calendar__day.today {
+  background: var(--focus-red);
+  color: white;
+  font-weight: 600;
+}
+
+.focus-calendar__day.achieved {
+  background: rgba(229, 57, 53, 0.1);
+  color: var(--focus-red);
+  font-weight: 600;
+}
+
+/* Ring chart */
+.focus-ring-chart {
+  width: 160px;
+  height: 160px;
+  margin: 0 auto;
+}
+
+/* --- Color Picker (for lists) --- */
+.focus-color-picker {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: var(--focus-spacing-sm);
+  padding: var(--focus-spacing-md) 0;
+}
+
+.focus-color-picker__swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+  border: 2px solid transparent;
+}
+
+.focus-color-picker__swatch:hover {
+  transform: scale(1.15);
+}
+
+.focus-color-picker__swatch.selected {
+  border-color: var(--focus-text);
+  transform: scale(1.15);
+  box-shadow: var(--focus-shadow-md);
+}
+
+/* --- Confirm Dialog --- */
+.focus-confirm__message {
+  font-size: 14px;
+  color: var(--focus-text-secondary);
+  line-height: 1.6;
+  text-align: center;
+  padding: var(--focus-spacing-xl) 0;
+}
+
+/* --- Scrollbar Styling --- */
+.focus-app ::-webkit-scrollbar {
+  width: 6px;
+}
+
+.focus-app ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.focus-app ::-webkit-scrollbar-thumb {
+  background: var(--focus-border);
+  border-radius: 3px;
+}
+
+.focus-app ::-webkit-scrollbar-thumb:hover {
+  background: var(--focus-text-disabled);
+}
+
+/* --- Tooltip --- */
+.focus-tooltip {
+  position: relative;
+}
+
+.focus-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: var(--focus-text);
+  color: var(--focus-surface);
+  font-size: 11px;
+  border-radius: var(--focus-radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--focus-transition-fast);
+}
+
+.focus-tooltip:hover::after {
+  opacity: 1;
+}
+
+/* --- Empty State --- */
+.focus-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--focus-spacing-xxl) * 2;
+  color: var(--focus-text-muted);
+}
+
+.focus-empty__icon {
+  font-size: 48px;
+  margin-bottom: var(--focus-spacing-lg);
+  opacity: 0.4;
+}
+
+.focus-empty__text {
+  font-size: 14px;
+}
+
+/* --- Responsive (minimal, desktop-first) --- */
+@media (max-width: 768px) {
+  .focus-sidebar {
+    position: fixed;
+    left: -100%;
+    z-index: 100;
+    transition: left var(--focus-transition-normal);
+    box-shadow: var(--focus-shadow-xl);
+  }
+
+  .focus-sidebar.open {
+    left: 0;
+  }
+
+  .focus-detail {
+    position: fixed;
+    right: -100%;
+    z-index: 100;
+    transition: right var(--focus-transition-normal);
+    box-shadow: var(--focus-shadow-xl);
+  }
+
+  .focus-detail.open {
+    right: 0;
+  }
+
+  .focus-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

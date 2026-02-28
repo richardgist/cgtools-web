@@ -1,5 +1,5 @@
-// 专注清单 - 核心状态管理
-import { ref, computed, watch, type Ref } from 'vue'
+// 专注清单 - 核心状态管理（SQLite 后端）
+import { ref, computed, type Ref } from 'vue'
 
 // ==================== Types ====================
 export interface FocusTask {
@@ -133,40 +133,53 @@ const dateInRange = (dateStr: string, start: Date, end: Date) => {
     return d >= start && d <= end
 }
 
+// ==================== API Helpers ====================
+async function api<T>(url: string, body?: any): Promise<T> {
+    if (body !== undefined) {
+        const res = await $fetch<T>(url, { method: 'POST', body })
+        return res
+    }
+    return await $fetch<T>(url)
+}
+
 // ==================== Store Singleton ====================
 let _store: ReturnType<typeof createFocusStore> | null = null
 
 function createFocusStore() {
-    // --- Load from localStorage ---
-    function loadJSON<T>(key: string, fallback: T): T {
-        if (typeof window === 'undefined') return fallback
-        try {
-            const raw = localStorage.getItem(key)
-            return raw ? JSON.parse(raw) : fallback
-        } catch { return fallback }
-    }
-
-    // --- Reactive State ---
-    const tasks: Ref<FocusTask[]> = ref(loadJSON('focus_tasks', []))
-    const lists: Ref<FocusList[]> = ref(loadJSON('focus_lists', [
+    // --- Reactive State (initialized empty, populated from server) ---
+    const tasks: Ref<FocusTask[]> = ref([])
+    const lists: Ref<FocusList[]> = ref([
         { id: 'default', name: '默认清单', color: '#1E88E5', order: 0, createdAt: Date.now() }
-    ]))
-    const folders: Ref<FocusFolder[]> = ref(loadJSON('focus_folders', []))
-    const records: Ref<PomodoroRecord[]> = ref(loadJSON('focus_records', []))
-    const settings: Ref<FocusSettings> = ref(loadJSON('focus_settings', { ...DEFAULT_SETTINGS }))
+    ])
+    const folders: Ref<FocusFolder[]> = ref([])
+    const records: Ref<PomodoroRecord[]> = ref([])
+    const settings: Ref<FocusSettings> = ref({ ...DEFAULT_SETTINGS })
 
     // UI state
-    const currentView = ref<SmartView | string>(loadJSON('focus_view', 'today'))
+    const currentView = ref<SmartView | string>('today')
     const selectedTaskId = ref<string | null>(null)
     const showCompletedTasks = ref(true)
+    let _loaded = false
 
-    // --- Persistence ---
-    watch(tasks, v => localStorage.setItem('focus_tasks', JSON.stringify(v)), { deep: true })
-    watch(lists, v => localStorage.setItem('focus_lists', JSON.stringify(v)), { deep: true })
-    watch(folders, v => localStorage.setItem('focus_folders', JSON.stringify(v)), { deep: true })
-    watch(records, v => localStorage.setItem('focus_records', JSON.stringify(v)), { deep: true })
-    watch(settings, v => localStorage.setItem('focus_settings', JSON.stringify(v)), { deep: true })
-    watch(currentView, v => localStorage.setItem('focus_view', JSON.stringify(v)))
+    // --- Load from server ---
+    async function loadFromServer() {
+        if (_loaded) return
+        _loaded = true
+        try {
+            const [serverTasks, serverLists, serverRecords, serverSettings] = await Promise.all([
+                api<FocusTask[]>('/api/focus/tasks'),
+                api<FocusList[]>('/api/focus/lists'),
+                api<PomodoroRecord[]>('/api/focus/records'),
+                api<Partial<FocusSettings>>('/api/focus/settings'),
+            ])
+            tasks.value = serverTasks
+            if (serverLists.length > 0) lists.value = serverLists
+            records.value = serverRecords
+            settings.value = { ...DEFAULT_SETTINGS, ...serverSettings }
+        } catch (e) {
+            console.error('[FocusStore] Failed to load from server:', e)
+        }
+    }
 
     // --- Computed ---
     const selectedTask = computed(() =>
@@ -281,7 +294,7 @@ function createFocusStore() {
         }
     })
 
-    // --- Actions ---
+    // --- Actions (local update + async server sync) ---
     function addTask(name: string, listId?: string) {
         const task: FocusTask = {
             id: uid(),
@@ -297,14 +310,17 @@ function createFocusStore() {
             order: settings.value.addTaskOnTop ? -Date.now() : Date.now(),
         }
         tasks.value.push(task)
+        // Sync to server
+        api('/api/focus/tasks', { action: 'create', task }).catch(e => console.error('[FocusStore] addTask sync error:', e))
         return task
     }
 
     function updateTask(id: string, updates: Partial<FocusTask>) {
         const idx = tasks.value.findIndex(t => t.id === id)
         if (idx >= 0) {
-            tasks.value[idx] = { ...tasks.value[idx], ...updates }
+            tasks.value[idx] = { ...tasks.value[idx]!, ...updates }
         }
+        api('/api/focus/tasks', { action: 'update', id, updates }).catch(e => console.error('[FocusStore] updateTask sync error:', e))
     }
 
     function toggleTask(id: string) {
@@ -313,11 +329,13 @@ function createFocusStore() {
             task.completed = !task.completed
             task.completedAt = task.completed ? Date.now() : undefined
         }
+        api('/api/focus/tasks', { action: 'toggle', id }).catch(e => console.error('[FocusStore] toggleTask sync error:', e))
     }
 
     function deleteTask(id: string) {
         tasks.value = tasks.value.filter(t => t.id !== id)
         if (selectedTaskId.value === id) selectedTaskId.value = null
+        api('/api/focus/tasks', { action: 'delete', id }).catch(e => console.error('[FocusStore] deleteTask sync error:', e))
     }
 
     function addList(name: string, color: string) {
@@ -329,14 +347,16 @@ function createFocusStore() {
             createdAt: Date.now(),
         }
         lists.value.push(list)
+        api('/api/focus/lists', { action: 'create', list }).catch(e => console.error('[FocusStore] addList sync error:', e))
         return list
     }
 
     function updateList(id: string, updates: Partial<FocusList>) {
         const idx = lists.value.findIndex(l => l.id === id)
         if (idx >= 0) {
-            lists.value[idx] = { ...lists.value[idx], ...updates }
+            lists.value[idx] = { ...lists.value[idx]!, ...updates }
         }
+        api('/api/focus/lists', { action: 'update', id, updates }).catch(e => console.error('[FocusStore] updateList sync error:', e))
     }
 
     function deleteList(id: string) {
@@ -344,6 +364,7 @@ function createFocusStore() {
         // Move tasks to default
         tasks.value.forEach(t => { if (t.listId === id) t.listId = 'default' })
         if (currentView.value === id) currentView.value = 'all'
+        api('/api/focus/lists', { action: 'delete', id }).catch(e => console.error('[FocusStore] deleteList sync error:', e))
     }
 
     function addFolder(name: string) {
@@ -353,11 +374,14 @@ function createFocusStore() {
     }
 
     function addRecord(record: Omit<PomodoroRecord, 'id'>) {
-        records.value.push({ ...record, id: uid() })
+        const fullRecord = { ...record, id: uid() }
+        records.value.push(fullRecord)
+        api('/api/focus/records', { record: fullRecord }).catch(e => console.error('[FocusStore] addRecord sync error:', e))
     }
 
     function updateSettings(updates: Partial<FocusSettings>) {
         settings.value = { ...settings.value, ...updates }
+        api('/api/focus/settings', { updates }).catch(e => console.error('[FocusStore] updateSettings sync error:', e))
     }
 
     // --- Report Data ---
@@ -400,7 +424,7 @@ function createFocusStore() {
             const d = new Date(r.startTime)
             const day = (d.getDay() + 6) % 7 // 0=Monday
             const hour = d.getHours()
-            data[day][hour] += Math.round(r.duration / 60)
+            data[day]![hour]! += Math.round(r.duration / 60)
         }
         return data
     }
@@ -411,7 +435,7 @@ function createFocusStore() {
         const map: Record<string, { name: string; minutes: number }> = {}
         for (const r of recs) {
             if (!map[r.taskId]) map[r.taskId] = { name: r.taskName, minutes: 0 }
-            map[r.taskId].minutes += Math.round(r.duration / 60)
+            map[r.taskId]!.minutes += Math.round(r.duration / 60)
         }
         return Object.entries(map)
             .map(([id, v]) => ({ taskId: id, ...v }))
@@ -447,6 +471,7 @@ function createFocusStore() {
         addTask, updateTask, toggleTask, deleteTask,
         addList, updateList, deleteList,
         addFolder, addRecord, updateSettings,
+        loadFromServer,
         // Report helpers
         getHeatmapData, getFocusRanking, getListDistribution, getRecordsInRange,
     }

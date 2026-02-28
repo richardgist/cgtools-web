@@ -12,8 +12,14 @@
         v-for="view in store.SMART_VIEWS"
         :key="view.key"
         class="focus-sidebar__item"
-        :class="{ active: store.currentView.value === view.key }"
+        :class="{
+          active: store.currentView.value === view.key,
+          'drop-hover': dropTarget === view.key
+        }"
         @click="store.currentView.value = view.key"
+        @dragover.prevent="onDragOver(view.key)"
+        @dragleave="onDragLeave"
+        @drop.prevent="onDrop(view.key)"
       >
         <span class="focus-sidebar__item-icon">{{ view.icon }}</span>
         <span>{{ view.label }}</span>
@@ -45,9 +51,15 @@
             v-for="list in listsInFolder(folder.id)"
             :key="list.id"
             class="focus-sidebar__item"
-            :class="{ active: store.currentView.value === list.id }"
+            :class="{
+              active: store.currentView.value === list.id,
+              'drop-hover': dropTarget === list.id
+            }"
             style="padding-left:36px;"
             @click="store.currentView.value = list.id"
+            @dragover.prevent="onDragOver(list.id)"
+            @dragleave="onDragLeave"
+            @drop.prevent="onDrop(list.id)"
           >
             <span class="focus-sidebar__list-dot" :style="{ background: list.color }"></span>
             <span>{{ list.name }}</span>
@@ -63,8 +75,14 @@
         v-for="list in topLevelLists"
         :key="list.id"
         class="focus-sidebar__item"
-        :class="{ active: store.currentView.value === list.id }"
+        :class="{
+          active: store.currentView.value === list.id,
+          'drop-hover': dropTarget === list.id
+        }"
         @click="store.currentView.value = list.id"
+        @dragover.prevent="onDragOver(list.id)"
+        @dragleave="onDragLeave"
+        @drop.prevent="onDrop(list.id)"
       >
         <span class="focus-sidebar__list-dot" :style="{ background: list.color }"></span>
         <span>{{ list.name }}</span>
@@ -94,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, type Ref } from 'vue'
+import { ref, computed, inject, type Ref } from 'vue'
 import { useFocusStore } from '~/composables/useFocusStore'
 
 const emit = defineEmits(['openSettings', 'openStats', 'openCreateList'])
@@ -106,5 +124,22 @@ const topLevelLists = computed(() =>
 
 function listsInFolder(folderId: string) {
   return store.lists.value.filter(l => l.folderId === folderId).sort((a, b) => a.order - b.order)
+}
+
+// --- Drag & Drop ---
+const handleTaskDrop = inject<(targetKey: string) => void>('handleTaskDrop')
+const dropTarget = ref<string | null>(null)
+
+function onDragOver(key: string) {
+  dropTarget.value = key
+}
+
+function onDragLeave() {
+  dropTarget.value = null
+}
+
+function onDrop(key: string) {
+  dropTarget.value = null
+  handleTaskDrop?.(key)
 }
 </script>

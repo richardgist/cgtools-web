@@ -52,18 +52,20 @@
         </div>
       </div>
 
-      <!-- Mini Timer Bar (shows when timer is running in background) -->
+
+      <!-- Mini Timer Bars (shows all running timers in background) -->
       <div
-        v-if="isTimerRunningInBackground"
+        v-for="rt in timer.runningTimers.value"
+        :key="rt.taskId"
         class="focus-mini-timer"
-        @click="showTimer = true"
+        @click="openTimerFor(rt.taskId)"
       >
         <div class="focus-mini-timer__pulse"></div>
         <span class="focus-mini-timer__icon">🍅</span>
-        <span class="focus-mini-timer__task">{{ timer.currentTask.value?.name ?? '自由专注' }}</span>
-        <span class="focus-mini-timer__time">{{ timer.displayTime.value }}</span>
-        <span class="focus-mini-timer__label">{{ timer.stateLabel.value }}</span>
-        <button class="focus-mini-timer__stop" @click.stop="showStopConfirm = true" title="停止">
+        <span class="focus-mini-timer__task">{{ rt.taskName }}</span>
+        <span class="focus-mini-timer__time">{{ rt.displayTime }}</span>
+        <span class="focus-mini-timer__label">{{ rt.stateLabel }}</span>
+        <button class="focus-mini-timer__stop" @click.stop="timer.stop(rt.taskId)" title="停止">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
         </button>
       </div>
@@ -105,10 +107,13 @@
               completed: task.completed,
               'focus-task-item--running': isTaskRunning(task.id)
             }"
+            draggable="true"
+            @dragstart="onTaskDragStart($event, task)"
+            @dragend="onTaskDragEnd"
             @click="store.selectedTaskId.value = task.id"
           >
-            <!-- Running indicator: pulsing tomato -->
-            <div v-if="isTaskRunning(task.id)" class="focus-task-item__running-icon">🍅</div>
+            <!-- Running indicator: pulsing tomato (click to complete) -->
+            <div v-if="isTaskRunning(task.id)" class="focus-task-item__running-icon" @click.stop="completeRunningTask(task.id)" title="完成任务">🍅</div>
             <!-- Normal checkbox -->
             <div
               v-else
@@ -131,8 +136,8 @@
             </div>
             <!-- Running: show timer + status -->
             <template v-if="isTaskRunning(task.id)">
-              <span class="focus-task-item__timer">{{ timer.displayTime.value }}</span>
-              <span class="focus-task-item__status">{{ timer.stateLabel.value }}</span>
+              <span class="focus-task-item__timer">{{ timer.getDisplayTime(task.id) }}</span>
+              <span class="focus-task-item__status">{{ timer.getStateLabel(task.id) }}</span>
             </template>
             <!-- Not running: show priority + play -->
             <template v-else>
@@ -241,6 +246,11 @@ definePageMeta({ layout: false })
 const store = useFocusStore()
 const timer = usePomodoroTimer()
 
+// Load data from server (SQLite database)
+onMounted(() => {
+  store.loadFromServer()
+})
+
 const newTaskName = ref('')
 const taskInputRef = ref<HTMLInputElement | null>(null)
 const showTimer = ref(false)
@@ -278,8 +288,17 @@ function startFocusOn(task: FocusTask) {
 }
 
 function isTaskRunning(taskId: string) {
-  return timer.currentTaskId.value === taskId &&
-    (timer.state.value === 'running' || timer.state.value === 'paused')
+  return timer.isTaskActive(taskId)
+}
+
+function completeRunningTask(taskId: string) {
+  timer.stop(taskId)
+  store.toggleTask(taskId)
+}
+
+function openTimerFor(taskId: string) {
+  timer.switchTask(taskId)
+  showTimer.value = true
 }
 
 function onTimerClose() {
@@ -293,10 +312,84 @@ function confirmStop() {
   showStopConfirm.value = false
 }
 
-// Timer is running but overlay is hidden
-const isTimerRunningInBackground = computed(() =>
-  !showTimer.value && (timer.state.value === 'running' || timer.state.value === 'paused')
-)
+// --- Drag & Drop ---
+const draggingTaskId = ref<string | null>(null)
+provide('draggingTaskId', draggingTaskId)
+
+function onTaskDragStart(e: DragEvent, task: FocusTask) {
+  draggingTaskId.value = task.id
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', task.id)
+  // Add a subtle drag image
+  const el = e.target as HTMLElement
+  el.style.opacity = '0.5'
+}
+
+function onTaskDragEnd(e: DragEvent) {
+  draggingTaskId.value = null
+  const el = e.target as HTMLElement
+  el.style.opacity = ''
+}
+
+function handleTaskDrop(targetKey: string) {
+  const taskId = draggingTaskId.value
+  if (!taskId) return
+
+  const today = new Date()
+  const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const tomorrowDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+
+  switch (targetKey) {
+    case 'today':
+      store.updateTask(taskId, { dueDate: todayDate })
+      break
+    case 'tomorrow':
+      store.updateTask(taskId, { dueDate: tomorrowDate })
+      break
+    case 'week': {
+      // Set to end of this week (Sunday)
+      const day = today.getDay()
+      const sunday = new Date(today)
+      sunday.setDate(today.getDate() + (7 - day))
+      const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`
+      store.updateTask(taskId, { dueDate: sundayStr })
+      break
+    }
+    case 'next7': {
+      // Set to 3 days from now
+      const d = new Date(today)
+      d.setDate(d.getDate() + 3)
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      store.updateTask(taskId, { dueDate: dateStr })
+      break
+    }
+    case 'high':
+      store.updateTask(taskId, { priority: 'high' })
+      break
+    case 'planned':
+      // Already has a date? keep it, otherwise set to today
+      const task = store.tasks.value.find(t => t.id === taskId)
+      if (task && !task.dueDate) {
+        store.updateTask(taskId, { dueDate: todayDate })
+      }
+      break
+    case 'completed':
+      store.toggleTask(taskId)
+      break
+    case 'all':
+      // Just move, no specific change needed
+      break
+    default:
+      // Custom list - move task to that list
+      store.updateTask(taskId, { listId: targetKey })
+      break
+  }
+
+  draggingTaskId.value = null
+}
+provide('handleTaskDrop', handleTaskDrop)
 
 function formatEstimate(minutes: number) {
   if (minutes < 60) return `${minutes}分钟`

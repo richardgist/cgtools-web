@@ -1,172 +1,242 @@
-// 专注清单 - 番茄钟计时器逻辑
-import { ref, computed, watch, onUnmounted } from 'vue'
+// 专注清单 - 番茄钟计时器逻辑 (多任务并行)
+import { ref, computed, reactive, watch } from 'vue'
 import { useFocusStore } from './useFocusStore'
 
 export type TimerState = 'idle' | 'running' | 'paused' | 'break' | 'longBreak'
 
+export interface TimerInstance {
+    taskId: string
+    state: TimerState
+    remainingSeconds: number
+    totalSeconds: number
+    pomodoroCount: number
+    sessionStartTime: number
+    intervalId: ReturnType<typeof setInterval> | null
+}
+
+// Singleton state - shared across all usePomodoroTimer() calls
+const activeTimers = reactive<Map<string, TimerInstance>>(new Map())
+const focusedTaskId = ref<string | null>(null) // which task the fullscreen is viewing
+
 export function usePomodoroTimer() {
     const store = useFocusStore()
 
-    const state = ref<TimerState>('idle')
-    const remainingSeconds = ref(0)
-    const totalSeconds = ref(0)
-    const currentTaskId = ref<string | null>(null)
-    const pomodoroCount = ref(0) // consecutive pomodoro count
-    const sessionStartTime = ref(0)
-    const countUp = ref(false) // true = count up mode
-    const elapsedSeconds = ref(0) // for count up
+    // --- Per-timer helpers ---
+    function getTimer(taskId: string): TimerInstance | undefined {
+        return activeTimers.get(taskId)
+    }
 
-    let intervalId: ReturnType<typeof setInterval> | null = null
+    function getTimerState(taskId: string): TimerState {
+        return activeTimers.get(taskId)?.state ?? 'idle'
+    }
 
-    const currentTask = computed(() =>
-        currentTaskId.value ? store.tasks.value.find(t => t.id === currentTaskId.value) ?? null : null
-    )
+    function isTaskActive(taskId: string): boolean {
+        const t = activeTimers.get(taskId)
+        return !!t && (t.state === 'running' || t.state === 'paused')
+    }
 
-    const progress = computed(() => {
-        if (totalSeconds.value === 0) return 0
-        if (countUp.value) return Math.min(elapsedSeconds.value / totalSeconds.value, 1)
-        return 1 - (remainingSeconds.value / totalSeconds.value)
-    })
-
-    const displayTime = computed(() => {
-        const secs = countUp.value ? elapsedSeconds.value : remainingSeconds.value
-        const m = Math.floor(secs / 60)
-        const s = secs % 60
+    function getDisplayTime(taskId: string): string {
+        const t = activeTimers.get(taskId)
+        if (!t) return '00:00'
+        const m = Math.floor(t.remainingSeconds / 60)
+        const s = t.remainingSeconds % 60
         return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    })
+    }
 
-    const isBreak = computed(() => state.value === 'break' || state.value === 'longBreak')
+    function getProgress(taskId: string): number {
+        const t = activeTimers.get(taskId)
+        if (!t || t.totalSeconds === 0) return 0
+        return 1 - (t.remainingSeconds / t.totalSeconds)
+    }
 
-    const stateLabel = computed(() => {
-        switch (state.value) {
+    function getStateLabel(taskId: string): string {
+        const s = getTimerState(taskId)
+        switch (s) {
             case 'running': return '专注中'
             case 'paused': return '已暂停'
             case 'break': return '短休息'
             case 'longBreak': return '长休息'
             default: return '准备开始'
         }
-    })
-
-    function startTimer(durationMinutes: number) {
-        totalSeconds.value = durationMinutes * 60
-        remainingSeconds.value = durationMinutes * 60
-        elapsedSeconds.value = 0
-        sessionStartTime.value = Date.now()
-
-        clearInterval(intervalId!)
-        intervalId = setInterval(tick, 1000)
     }
 
-    function tick() {
-        if (countUp.value) {
-            elapsedSeconds.value++
-            if (elapsedSeconds.value >= totalSeconds.value) {
-                onTimerComplete()
+    // --- Focused task (for fullscreen view) ---
+    const currentTaskId = focusedTaskId
+
+    const currentTask = computed(() =>
+        currentTaskId.value ? store.tasks.value.find(t => t.id === currentTaskId.value) ?? null : null
+    )
+
+    // Focused timer's computed values (for fullscreen)
+    const state = computed(() => getTimerState(currentTaskId.value ?? ''))
+    const remainingSeconds = computed(() => activeTimers.get(currentTaskId.value ?? '')?.remainingSeconds ?? 0)
+    const totalSeconds = computed(() => activeTimers.get(currentTaskId.value ?? '')?.totalSeconds ?? 0)
+    const pomodoroCount = computed(() => activeTimers.get(currentTaskId.value ?? '')?.pomodoroCount ?? 0)
+    const progress = computed(() => getProgress(currentTaskId.value ?? ''))
+    const displayTime = computed(() => getDisplayTime(currentTaskId.value ?? ''))
+    const isBreak = computed(() => state.value === 'break' || state.value === 'longBreak')
+    const stateLabel = computed(() => getStateLabel(currentTaskId.value ?? ''))
+
+    // All running timers
+    const runningTimers = computed(() => {
+        const result: { taskId: string; taskName: string; displayTime: string; stateLabel: string }[] = []
+        for (const [taskId, t] of activeTimers) {
+            if (t.state === 'running' || t.state === 'paused') {
+                const task = store.tasks.value.find(tk => tk.id === taskId)
+                result.push({
+                    taskId,
+                    taskName: task?.name ?? '未知任务',
+                    displayTime: getDisplayTime(taskId),
+                    stateLabel: getStateLabel(taskId),
+                })
             }
-        } else {
-            remainingSeconds.value--
-            if (remainingSeconds.value <= 0) {
-                onTimerComplete()
-            }
+        }
+        return result
+    })
+
+    // --- Timer tick ---
+    function tick(taskId: string) {
+        const t = activeTimers.get(taskId)
+        if (!t) return
+        t.remainingSeconds--
+        if (t.remainingSeconds <= 0) {
+            onTimerComplete(taskId)
         }
     }
 
-    function onTimerComplete() {
-        clearInterval(intervalId!)
-        intervalId = null
+    function onTimerComplete(taskId: string) {
+        const t = activeTimers.get(taskId)
+        if (!t) return
 
-        // Play notification sound
+        clearInterval(t.intervalId!)
+        t.intervalId = null
+
         playNotificationSound()
 
-        if (state.value === 'running') {
-            // Pomodoro completed
-            const duration = Math.round((Date.now() - sessionStartTime.value) / 1000)
-            if (currentTaskId.value && currentTask.value) {
+        if (t.state === 'running') {
+            // Pomodoro completed - record it
+            const duration = Math.round((Date.now() - t.sessionStartTime) / 1000)
+            const task = store.tasks.value.find(tk => tk.id === taskId)
+            if (task) {
                 store.addRecord({
-                    taskId: currentTaskId.value,
-                    taskName: currentTask.value.name,
-                    listId: currentTask.value.listId,
-                    startTime: sessionStartTime.value,
+                    taskId,
+                    taskName: task.name,
+                    listId: task.listId,
+                    startTime: t.sessionStartTime,
                     endTime: Date.now(),
                     duration,
                     completed: true,
                 })
-                // Increment completed pomodoro count on task
-                store.updateTask(currentTaskId.value, {
-                    pomodoroCompleted: (currentTask.value.pomodoroCompleted ?? 0) + 1
+                store.updateTask(taskId, {
+                    pomodoroCompleted: (task.pomodoroCompleted ?? 0) + 1
                 })
             }
 
-            pomodoroCount.value++
+            t.pomodoroCount++
 
             if (store.settings.value.disableBreak) {
                 if (store.settings.value.autoStartNextPomodoro) {
-                    startFocus(currentTaskId.value)
+                    startTimerInternal(taskId, store.settings.value.pomodoroDuration, 'running')
                 } else {
-                    state.value = 'idle'
+                    t.state = 'idle'
                 }
             } else {
                 // Start break
-                if (pomodoroCount.value % store.settings.value.longBreakInterval === 0) {
-                    state.value = 'longBreak'
+                if (t.pomodoroCount % store.settings.value.longBreakInterval === 0) {
+                    t.state = 'longBreak'
                     if (store.settings.value.autoStartBreak) {
-                        startTimer(store.settings.value.longBreakDuration)
+                        startTimerInternal(taskId, store.settings.value.longBreakDuration, 'longBreak')
                     } else {
-                        remainingSeconds.value = store.settings.value.longBreakDuration * 60
-                        totalSeconds.value = store.settings.value.longBreakDuration * 60
+                        t.remainingSeconds = store.settings.value.longBreakDuration * 60
+                        t.totalSeconds = store.settings.value.longBreakDuration * 60
                     }
                 } else {
-                    state.value = 'break'
+                    t.state = 'break'
                     if (store.settings.value.autoStartBreak) {
-                        startTimer(store.settings.value.shortBreakDuration)
+                        startTimerInternal(taskId, store.settings.value.shortBreakDuration, 'break')
                     } else {
-                        remainingSeconds.value = store.settings.value.shortBreakDuration * 60
-                        totalSeconds.value = store.settings.value.shortBreakDuration * 60
+                        t.remainingSeconds = store.settings.value.shortBreakDuration * 60
+                        t.totalSeconds = store.settings.value.shortBreakDuration * 60
                     }
                 }
             }
-        } else if (isBreak.value) {
+        } else if (t.state === 'break' || t.state === 'longBreak') {
             // Break completed
             if (store.settings.value.autoStartNextPomodoro) {
-                startFocus(currentTaskId.value)
+                startTimerInternal(taskId, store.settings.value.pomodoroDuration, 'running')
             } else {
-                state.value = 'idle'
+                t.state = 'idle'
             }
         }
     }
 
+    function startTimerInternal(taskId: string, durationMinutes: number, newState: TimerState) {
+        let t = activeTimers.get(taskId)
+        if (!t) {
+            t = reactive<TimerInstance>({
+                taskId,
+                state: 'idle',
+                remainingSeconds: 0,
+                totalSeconds: 0,
+                pomodoroCount: 0,
+                sessionStartTime: 0,
+                intervalId: null,
+            })
+            activeTimers.set(taskId, t)
+        }
+
+        clearInterval(t.intervalId!)
+        t.state = newState
+        t.totalSeconds = durationMinutes * 60
+        t.remainingSeconds = durationMinutes * 60
+        t.sessionStartTime = Date.now()
+        t.intervalId = setInterval(() => tick(taskId), 1000)
+    }
+
+    // --- Public API ---
     function startFocus(taskId: string | null) {
-        currentTaskId.value = taskId
-        state.value = 'running'
-        startTimer(store.settings.value.pomodoroDuration)
+        if (!taskId) return
+        focusedTaskId.value = taskId
+        startTimerInternal(taskId, store.settings.value.pomodoroDuration, 'running')
     }
 
-    function pause() {
-        if (state.value === 'running' || isBreak.value) {
-            state.value = 'paused'
-            clearInterval(intervalId!)
-            intervalId = null
+    function pause(taskId?: string) {
+        const id = taskId ?? currentTaskId.value
+        if (!id) return
+        const t = activeTimers.get(id)
+        if (!t) return
+        if (t.state === 'running' || t.state === 'break' || t.state === 'longBreak') {
+            t.state = 'paused'
+            clearInterval(t.intervalId!)
+            t.intervalId = null
         }
     }
 
-    function resume() {
-        if (state.value === 'paused') {
-            // Determine what we were doing
-            state.value = 'running' // simplified - resume as running
-            intervalId = setInterval(tick, 1000)
-        }
+    function resume(taskId?: string) {
+        const id = taskId ?? currentTaskId.value
+        if (!id) return
+        const t = activeTimers.get(id)
+        if (!t || t.state !== 'paused') return
+        t.state = 'running'
+        t.intervalId = setInterval(() => tick(id), 1000)
     }
 
-    function stop() {
-        // Record partial session if running
-        if (state.value === 'running' || state.value === 'paused') {
-            const duration = Math.round((Date.now() - sessionStartTime.value) / 1000)
-            if (currentTaskId.value && currentTask.value && duration > 60) {
+    function stop(taskId?: string) {
+        const id = taskId ?? currentTaskId.value
+        if (!id) return
+        const t = activeTimers.get(id)
+        if (!t) return
+
+        // Record partial session
+        if (t.state === 'running' || t.state === 'paused') {
+            const duration = Math.round((Date.now() - t.sessionStartTime) / 1000)
+            const task = store.tasks.value.find(tk => tk.id === id)
+            if (task && duration > 60) {
                 store.addRecord({
-                    taskId: currentTaskId.value,
-                    taskName: currentTask.value.name,
-                    listId: currentTask.value.listId,
-                    startTime: sessionStartTime.value,
+                    taskId: id,
+                    taskName: task.name,
+                    listId: task.listId,
+                    startTime: t.sessionStartTime,
                     endTime: Date.now(),
                     duration,
                     completed: false,
@@ -174,17 +244,18 @@ export function usePomodoroTimer() {
             }
         }
 
-        clearInterval(intervalId!)
-        intervalId = null
-        state.value = 'idle'
-        remainingSeconds.value = 0
-        totalSeconds.value = 0
-        elapsedSeconds.value = 0
-        currentTaskId.value = null
+        clearInterval(t.intervalId!)
+        activeTimers.delete(id)
     }
 
     function switchTask(taskId: string) {
-        currentTaskId.value = taskId
+        focusedTaskId.value = taskId
+    }
+
+    function stopAll() {
+        for (const [id] of activeTimers) {
+            stop(id)
+        }
     }
 
     function playNotificationSound() {
@@ -200,7 +271,6 @@ export function usePomodoroTimer() {
             gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8)
             osc.stop(ctx.currentTime + 0.8)
 
-            // Second beep
             setTimeout(() => {
                 const osc2 = ctx.createOscillator()
                 const gain2 = ctx.createGain()
@@ -215,16 +285,24 @@ export function usePomodoroTimer() {
         } catch { }
     }
 
-    // Cleanup on unmount
-    if (typeof window !== 'undefined') {
-        // not calling onUnmounted in composable - interval cleans up on stop()
-    }
-
     return {
+        // Focused timer (for fullscreen view compatibility)
         state, remainingSeconds, totalSeconds, currentTaskId,
-        pomodoroCount, countUp, elapsedSeconds,
-        currentTask, progress, displayTime, isBreak, stateLabel,
-        startFocus, pause, resume, stop, switchTask,
+        pomodoroCount, currentTask, progress, displayTime, isBreak, stateLabel,
+        // Multi-timer API
+        activeTimers,
+        runningTimers,
+        isTaskActive,
+        getTimer,
+        getTimerState,
+        getDisplayTime,
+        getProgress,
+        getStateLabel,
+        // Actions
+        startFocus, pause, resume, stop, switchTask, stopAll,
+        // Legacy compat
+        countUp: ref(false),
+        elapsedSeconds: ref(0),
     }
 }
 
@@ -293,7 +371,6 @@ export function useWhiteNoise() {
         const data = buffer.getChannelData(0)
         for (let i = 0; i < bufferSize; i++) {
             data[i] = (Math.random() * 2 - 1) * 0.3
-            // Add occasional louder drops
             if (Math.random() < 0.001) {
                 for (let j = 0; j < 100 && i + j < bufferSize; j++) {
                     data[i + j] += (Math.random() * 2 - 1) * 0.5 * Math.exp(-j / 20)
@@ -312,7 +389,6 @@ export function useWhiteNoise() {
             const white = Math.random() * 2 - 1
             data[i] = (lastOut + 0.05 * white) / 1.05
             lastOut = data[i]
-            // Modulate with slow wave for gusts
             data[i] *= (1 + 0.4 * Math.sin(i / (ctx.sampleRate * 3)))
             data[i] *= 2
         }
@@ -345,7 +421,7 @@ export function useWhiteNoise() {
         gainNode.connect(audioCtx.destination)
 
         let buffer: AudioBuffer | null = null
-        const dur = 10 // buffer duration in seconds
+        const dur = 10
 
         switch (noiseId) {
             case 'brown':
@@ -364,10 +440,9 @@ export function useWhiteNoise() {
             case 'tick':
             case 'countdown':
             case 'metronome':
-                buffer = generateTick(audioCtx,)
+                buffer = generateTick(audioCtx)
                 break
             default:
-                // Generate a filtered white noise as fallback for other sounds
                 buffer = generateRain(audioCtx, dur)
                 break
         }
@@ -402,7 +477,6 @@ export function useWhiteNoise() {
         }
     }
 
-    // Watch volume changes
     watch(volume, (v) => {
         if (gainNode) gainNode.gain.value = v / 100
     })

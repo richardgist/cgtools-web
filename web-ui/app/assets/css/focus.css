@@ -335,6 +335,14 @@
   font-weight: 600;
 }
 
+.focus-sidebar__item.drop-hover {
+  background: rgba(229, 57, 53, 0.15);
+  outline: 2px dashed var(--focus-red);
+  outline-offset: -2px;
+  color: var(--focus-red);
+  transform: scale(1.02);
+}
+
 .focus-sidebar__item-icon {
   width: 20px;
   height: 20px;
@@ -543,7 +551,7 @@
   background: var(--focus-surface);
   border-radius: var(--focus-radius-md);
   margin-bottom: var(--focus-spacing-xs);
-  cursor: pointer;
+  cursor: grab;
   transition: all var(--focus-transition-fast);
   border: 1px solid transparent;
   animation: focus-fadeInUp 0.3s ease;

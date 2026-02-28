@@ -33,8 +33,7 @@ echo.
 echo ============================================
 echo   ✅ 更新完成！
 echo.
-echo   Web UI:  http://localhost:18432
-echo   Proxy:   http://localhost:8082/health
+echo   访问地址:  http://localhost:18432
 echo ============================================
 echo.
 

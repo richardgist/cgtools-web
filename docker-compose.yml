@@ -1,0 +1,53 @@
+# ============================================
+# CGTools - Docker Compose 配置
+# ============================================
+# 启动: docker compose up -d
+# 停止: docker compose down
+# 重建: docker compose build && docker compose up -d
+# 查看日志: docker compose logs -f [web|proxy]
+# ============================================
+
+services:
+  # --- CGTools Web (Nuxt 4) ---
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: cgtools-web
+    restart: unless-stopped
+    ports:
+      - "18432:18432"
+    volumes:
+      - db-data:/app/server/db
+    environment:
+      - NODE_ENV=production
+      - NITRO_PORT=18432
+      - NITRO_HOST=0.0.0.0
+    networks:
+      - cgtools-net
+
+  # --- CodeBuddy Proxy (Python) ---
+  proxy:
+    build:
+      context: ../codebuddy_proxy
+      dockerfile: Dockerfile.proxy
+    container_name: cgtools-proxy
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    volumes:
+      - proxy-data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - cgtools-net
+
+networks:
+  cgtools-net:
+    driver: bridge
+
+volumes:
+  db-data:
+    driver: local
+  proxy-data:
+    driver: local

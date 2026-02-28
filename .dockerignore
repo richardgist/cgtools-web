@@ -1,0 +1,11 @@
+node_modules
+.nuxt
+.output
+.git
+.gitignore
+*.log
+.claude
+.codebuddy
+skills
+README.md
+build_error*.log

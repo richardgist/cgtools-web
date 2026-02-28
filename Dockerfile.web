@@ -1,0 +1,52 @@
+# ============================================
+# CGTools Web - Nuxt 4 多阶段构建
+# ============================================
+
+# --- 阶段 1: 构建 ---
+FROM node:20-slim AS builder
+
+WORKDIR /app
+
+# better-sqlite3 需要编译工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# 先拷贝 package 文件，利用 Docker 缓存
+COPY web-ui/package.json web-ui/package-lock.json ./
+
+RUN npm ci
+
+# 拷贝源码并构建
+COPY web-ui/ ./
+
+RUN npm run build
+
+# --- 阶段 2: 运行 ---
+FROM node:20-slim AS runtime
+
+WORKDIR /app
+
+# 运行时也需要 better-sqlite3 的原生依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 从 builder 拷贝构建产物
+COPY --from=builder /app/.output ./.output
+
+# 创建数据目录 (匹配 focusDb.ts: resolve(process.cwd(), 'server/db'))
+RUN mkdir -p /app/server/db
+
+# 环境变量
+ENV HOST=0.0.0.0
+ENV PORT=18432
+ENV NODE_ENV=production
+ENV NITRO_PORT=18432
+ENV NITRO_HOST=0.0.0.0
+
+EXPOSE 18432
+
+CMD ["node", ".output/server/index.mjs"]

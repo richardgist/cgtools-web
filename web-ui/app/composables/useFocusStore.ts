@@ -338,6 +338,32 @@ function createFocusStore() {
         api('/api/focus/tasks', { action: 'delete', id }).catch(e => console.error('[FocusStore] deleteTask sync error:', e))
     }
 
+    function reorderTask(draggedId: string, targetId: string) {
+        if (draggedId === targetId) return
+        // Work on the current filtered (sorted) list
+        const sorted = [...filteredTasks.value]
+        const fromIdx = sorted.findIndex(t => t.id === draggedId)
+        const toIdx = sorted.findIndex(t => t.id === targetId)
+        if (fromIdx < 0 || toIdx < 0) return
+
+        // Move item in array
+        const [item] = sorted.splice(fromIdx, 1)
+        sorted.splice(toIdx, 0, item!)
+
+        // Reassign order values and sync each changed task
+        sorted.forEach((t, i) => {
+            const newOrder = i
+            if (t.order !== newOrder) {
+                t.order = newOrder
+                // Update in main tasks array
+                const mainTask = tasks.value.find(mt => mt.id === t.id)
+                if (mainTask) mainTask.order = newOrder
+                api('/api/focus/tasks', { action: 'update', id: t.id, updates: { order: newOrder } })
+                    .catch(e => console.error('[FocusStore] reorderTask sync error:', e))
+            }
+        })
+    }
+
     function addList(name: string, color: string) {
         const list: FocusList = {
             id: uid(),
@@ -468,7 +494,7 @@ function createFocusStore() {
         // Constants
         SMART_VIEWS, LIST_COLORS,
         // Actions
-        addTask, updateTask, toggleTask, deleteTask,
+        addTask, updateTask, toggleTask, deleteTask, reorderTask,
         addList, updateList, deleteList,
         addFolder, addRecord, updateSettings,
         loadFromServer,

@@ -105,11 +105,15 @@
             :class="{
               active: store.selectedTaskId.value === task.id,
               completed: task.completed,
-              'focus-task-item--running': isTaskRunning(task.id)
+              'focus-task-item--running': isTaskRunning(task.id),
+              'focus-task-item--drag-over': dragOverTaskId === task.id
             }"
             draggable="true"
             @dragstart="onTaskDragStart($event, task)"
             @dragend="onTaskDragEnd"
+            @dragover.prevent="onTaskDragOver($event, task)"
+            @dragleave="onTaskDragLeave"
+            @drop.prevent="onTaskDrop(task)"
             @click="store.selectedTaskId.value = task.id"
           >
             <!-- Running indicator: pulsing tomato (click to complete) -->
@@ -314,21 +318,40 @@ function confirmStop() {
 
 // --- Drag & Drop ---
 const draggingTaskId = ref<string | null>(null)
+const dragOverTaskId = ref<string | null>(null)
 provide('draggingTaskId', draggingTaskId)
 
 function onTaskDragStart(e: DragEvent, task: FocusTask) {
   draggingTaskId.value = task.id
   e.dataTransfer!.effectAllowed = 'move'
   e.dataTransfer!.setData('text/plain', task.id)
-  // Add a subtle drag image
   const el = e.target as HTMLElement
   el.style.opacity = '0.5'
 }
 
 function onTaskDragEnd(e: DragEvent) {
   draggingTaskId.value = null
+  dragOverTaskId.value = null
   const el = e.target as HTMLElement
   el.style.opacity = ''
+}
+
+function onTaskDragOver(e: DragEvent, task: FocusTask) {
+  if (draggingTaskId.value && draggingTaskId.value !== task.id) {
+    dragOverTaskId.value = task.id
+    e.dataTransfer!.dropEffect = 'move'
+  }
+}
+
+function onTaskDragLeave() {
+  dragOverTaskId.value = null
+}
+
+function onTaskDrop(task: FocusTask) {
+  if (draggingTaskId.value && draggingTaskId.value !== task.id) {
+    store.reorderTask(draggingTaskId.value, task.id)
+  }
+  dragOverTaskId.value = null
 }
 
 function handleTaskDrop(targetKey: string) {
@@ -428,4 +451,16 @@ function isOverdue(dateStr: string) {
 .task-list-leave-active { transition: all 0.2s ease; }
 .task-list-leave-to { opacity: 0; transform: translateX(-20px); }
 .task-list-move { transition: transform 0.3s ease; }
+
+/* Drag reorder indicator */
+.focus-task-item--drag-over {
+  border-top: 2px solid var(--focus-red, #E53935) !important;
+  margin-top: -2px;
+}
+.focus-task-item[draggable="true"] {
+  cursor: grab;
+}
+.focus-task-item[draggable="true"]:active {
+  cursor: grabbing;
+}
 </style>

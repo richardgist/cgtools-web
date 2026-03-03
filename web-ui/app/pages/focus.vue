@@ -169,19 +169,47 @@
             已完成 ({{ store.completedTasks.value.length }})
           </div>
           <div v-if="store.showCompletedTasks.value">
-            <div
-              v-for="task in store.completedTasks.value"
-              :key="task.id"
-              class="focus-task-item completed"
-              @click="store.selectedTaskId.value = task.id"
-            >
-              <div class="focus-task-item__check checked" @click.stop="store.toggleTask(task.id)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            <!-- Today Completed -->
+            <template v-if="store.completedTasksGrouped.value.todayCompleted.length > 0">
+              <div class="focus-tasks__group-title">
+                <span class="focus-tasks__group-dot focus-tasks__group-dot--today"></span>
+                今天已完成 ({{ store.completedTasksGrouped.value.todayCompleted.length }})
               </div>
-              <div class="focus-task-item__content">
-                <div class="focus-task-item__name">{{ task.name }}</div>
+              <div
+                v-for="task in store.completedTasksGrouped.value.todayCompleted"
+                :key="task.id"
+                class="focus-task-item completed"
+                @click="store.selectedTaskId.value = task.id"
+              >
+                <div class="focus-task-item__check checked" @click.stop="store.toggleTask(task.id)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <div class="focus-task-item__content">
+                  <div class="focus-task-item__name">{{ task.name }}</div>
+                </div>
               </div>
-            </div>
+            </template>
+
+            <!-- Earlier Completed -->
+            <template v-if="store.completedTasksGrouped.value.earlierCompleted.length > 0">
+              <div class="focus-tasks__group-title">
+                <span class="focus-tasks__group-dot focus-tasks__group-dot--earlier"></span>
+                更早已完成 ({{ store.completedTasksGrouped.value.earlierCompleted.length }})
+              </div>
+              <div
+                v-for="task in store.completedTasksGrouped.value.earlierCompleted"
+                :key="task.id"
+                class="focus-task-item completed"
+                @click="store.selectedTaskId.value = task.id"
+              >
+                <div class="focus-task-item__check checked" @click.stop="store.toggleTask(task.id)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <div class="focus-task-item__content">
+                  <div class="focus-task-item__name">{{ task.name }}</div>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
       </div>

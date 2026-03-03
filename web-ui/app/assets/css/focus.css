@@ -542,6 +542,34 @@
   transform: rotate(-90deg);
 }
 
+/* Completed tasks group titles */
+.focus-tasks__group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--focus-text-muted);
+  padding: var(--focus-spacing-sm) 0 var(--focus-spacing-xs);
+  padding-left: var(--focus-spacing-md);
+  display: flex;
+  align-items: center;
+  gap: var(--focus-spacing-xs);
+  margin-top: var(--focus-spacing-sm);
+}
+
+.focus-tasks__group-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.focus-tasks__group-dot--today {
+  background: var(--focus-green);
+}
+
+.focus-tasks__group-dot--earlier {
+  background: var(--focus-text-disabled);
+}
+
 /* --- Task Item --- */
 .focus-task-item {
   display: flex;

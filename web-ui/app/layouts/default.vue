@@ -67,6 +67,29 @@
           <span class="nav-label">SVN Patch</span>
           <div class="nav-indicator"></div>
         </NuxtLink>
+
+        <NuxtLink to="/bridge" class="nav-item" exact-active-class="active" title="Bridge API">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
+              <line x1="4" y1="22" x2="4" y2="15"></line>
+            </svg>
+          </span>
+          <span class="nav-label">Bridge API</span>
+          <div class="nav-indicator"></div>
+        </NuxtLink>
+
+        <NuxtLink to="/android-so" class="nav-item" exact-active-class="active" title="Android SO">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a4 4 0 0 0-4 4v1H7a2 2 0 0 0-2 2v8a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V9a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4z"></path>
+              <path d="M9 11h6"></path>
+              <path d="M9 15h6"></path>
+            </svg>
+          </span>
+          <span class="nav-label">Android SO</span>
+          <div class="nav-indicator"></div>
+        </NuxtLink>
       </div>
 
       <div class="nav-footer">

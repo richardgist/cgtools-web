@@ -244,6 +244,26 @@ function createFocusStore() {
         return tasks.value.filter(t => t.completed && t.listId === view).sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
     })
 
+    const completedTasksGrouped = computed(() => {
+        const all = completedTasks.value
+        const todayStart = new Date()
+        todayStart.setHours(0, 0, 0, 0)
+        const todayMs = todayStart.getTime()
+
+        const todayCompleted: FocusTask[] = []
+        const earlierCompleted: FocusTask[] = []
+
+        for (const t of all) {
+            if (t.completedAt && t.completedAt >= todayMs) {
+                todayCompleted.push(t)
+            } else {
+                earlierCompleted.push(t)
+            }
+        }
+
+        return { todayCompleted, earlierCompleted }
+    })
+
     // Stats
     const todayRecords = computed(() => {
         const start = new Date()
@@ -486,7 +506,7 @@ function createFocusStore() {
         tasks, lists, folders, records, settings,
         currentView, selectedTaskId, showCompletedTasks,
         // Computed
-        selectedTask, currentListName, filteredTasks, completedTasks,
+        selectedTask, currentListName, filteredTasks, completedTasks, completedTasksGrouped,
         stats, listTaskCounts, smartViewCounts,
         totalFocusMinutes, weekFocusMinutes, todayFocusMinutes,
         totalCompletedTasks, weekCompletedTasks, todayCompletedTasks,

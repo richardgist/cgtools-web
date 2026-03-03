@@ -70,6 +70,26 @@
           </svg>
         </div>
       </NuxtLink>
+
+      <NuxtLink to="/android-so" class="dashboard-card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a4 4 0 0 0-4 4v1H7a2 2 0 0 0-2 2v8a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V9a2 2 0 0 0-2-2h-1V6a4 4 0 0 0-4-4z"></path>
+            <path d="M9 11h6"></path>
+            <path d="M9 15h6"></path>
+          </svg>
+        </div>
+        <div class="card-content">
+          <div class="card-title">Android SO Tooling</div>
+          <div class="card-desc">Build libUE4.so, replace into APK, and run AndroidInject flow with live logs.</div>
+        </div>
+        <div class="card-action">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </div>
+      </NuxtLink>
     </div>
   </div>
 </template>

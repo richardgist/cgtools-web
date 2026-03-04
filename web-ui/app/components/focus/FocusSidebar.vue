@@ -24,7 +24,11 @@
         <span class="focus-sidebar__item-icon">{{ view.icon }}</span>
         <span>{{ view.label }}</span>
         <span
-          v-if="(store.smartViewCounts.value as any)[view.key] > 0"
+          v-if="dropTarget === view.key && dragCount > 1"
+          class="focus-sidebar__drag-badge"
+        >移动 {{ dragCount }} 个</span>
+        <span
+          v-else-if="(store.smartViewCounts.value as any)[view.key] > 0"
           class="focus-sidebar__item-count"
         >{{ (store.smartViewCounts.value as any)[view.key] }}</span>
       </div>
@@ -128,6 +132,7 @@ function listsInFolder(folderId: string) {
 
 // --- Drag & Drop ---
 const handleTaskDrop = inject<(targetKey: string) => void>('handleTaskDrop')
+const draggingTaskIds = inject<Ref<string[]>>('draggingTaskIds')
 const dropTarget = ref<string | null>(null)
 
 function onDragOver(key: string) {
@@ -142,4 +147,6 @@ function onDrop(key: string) {
   dropTarget.value = null
   handleTaskDrop?.(key)
 }
+
+const dragCount = computed(() => draggingTaskIds?.value?.length ?? 0)
 </script>

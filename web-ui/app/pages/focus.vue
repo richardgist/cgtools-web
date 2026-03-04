@@ -96,6 +96,18 @@
           <div class="focus-empty__text">暂无任务，开始添加吧！</div>
         </div>
 
+        <!-- Batch selection toolbar -->
+        <div v-if="selectedSize > 0" class="focus-batch-toolbar">
+          <span class="focus-batch-toolbar__info">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            已选 {{ selectedSize }} 个任务，可拖拽到左侧批量操作
+          </span>
+          <button class="focus-batch-toolbar__clear" @click="clearSelection" title="取消选择">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            取消选择
+          </button>
+        </div>
+
         <!-- Active Tasks -->
         <TransitionGroup name="task-list" tag="div">
           <div
@@ -106,7 +118,8 @@
               active: store.selectedTaskId.value === task.id,
               completed: task.completed,
               'focus-task-item--running': isTaskRunning(task.id),
-              'focus-task-item--drag-over': dragOverTaskId === task.id
+              'focus-task-item--drag-over': dragOverTaskId === task.id,
+              'focus-task-item--selected': isSelected(task.id)
             }"
             draggable="true"
             @dragstart="onTaskDragStart($event, task)"
@@ -114,10 +127,19 @@
             @dragover.prevent="onTaskDragOver($event, task)"
             @dragleave="onTaskDragLeave"
             @drop.prevent="onTaskDrop(task)"
-            @click="store.selectedTaskId.value = task.id"
+            @click="onTaskClick($event, task)"
           >
+            <!-- Multi-select checkbox (shown when any task is selected) -->
+            <div
+              v-if="selectedSize > 0 && !isTaskRunning(task.id)"
+              class="focus-task-item__multi-check"
+              :class="{ checked: isSelected(task.id) }"
+              @click.stop="toggleTaskSelection(task.id)"
+            >
+              <svg v-if="isSelected(task.id)" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
             <!-- Running indicator: pulsing tomato (click to complete) -->
-            <div v-if="isTaskRunning(task.id)" class="focus-task-item__running-icon" @click.stop="completeRunningTask(task.id)" title="完成任务">🍅</div>
+            <div v-else-if="isTaskRunning(task.id)" class="focus-task-item__running-icon" @click.stop="completeRunningTask(task.id)" title="完成任务">🍅</div>
             <!-- Normal checkbox -->
             <div
               v-else
@@ -344,28 +366,83 @@ function confirmStop() {
   showStopConfirm.value = false
 }
 
+// --- Multi-select ---
+const selectedTaskIds = ref(new Set<string>())
+
+const selectedSize = computed(() => selectedTaskIds.value.size)
+function isSelected(id: string) { return selectedTaskIds.value.has(id) }
+
+function toggleTaskSelection(taskId: string) {
+  const next = new Set(selectedTaskIds.value)
+  if (next.has(taskId)) {
+    next.delete(taskId)
+  } else {
+    next.add(taskId)
+  }
+  selectedTaskIds.value = next
+}
+
+function clearSelection() {
+  selectedTaskIds.value = new Set()
+}
+
+function onTaskClick(e: MouseEvent, task: FocusTask) {
+  if (e.ctrlKey || e.metaKey) {
+    toggleTaskSelection(task.id)
+  } else if (selectedTaskIds.value.size > 0) {
+    toggleTaskSelection(task.id)
+  } else {
+    store.selectedTaskId.value = task.id
+  }
+}
+
 // --- Drag & Drop ---
-const draggingTaskId = ref<string | null>(null)
+const draggingTaskIds = ref<string[]>([])
 const dragOverTaskId = ref<string | null>(null)
-provide('draggingTaskId', draggingTaskId)
+provide('draggingTaskIds', draggingTaskIds)
+
+// Custom drag ghost element
+let ghostEl: HTMLElement | null = null
 
 function onTaskDragStart(e: DragEvent, task: FocusTask) {
-  draggingTaskId.value = task.id
+  // Determine which tasks to drag
+  const isBatch = selectedTaskIds.value.has(task.id) && selectedTaskIds.value.size > 1
+  if (isBatch) {
+    draggingTaskIds.value = Array.from(selectedTaskIds.value)
+  } else {
+    draggingTaskIds.value = [task.id]
+  }
+
   e.dataTransfer!.effectAllowed = 'move'
   e.dataTransfer!.setData('text/plain', task.id)
-  const el = e.target as HTMLElement
-  el.style.opacity = '0.5'
+
+  // Create custom ghost for batch drag
+  if (isBatch) {
+    ghostEl = document.createElement('div')
+    ghostEl.className = 'focus-drag-ghost'
+    ghostEl.textContent = `移动 ${draggingTaskIds.value.length} 个任务`
+    document.body.appendChild(ghostEl)
+    e.dataTransfer!.setDragImage(ghostEl, 60, 20)
+  } else {
+    const el = e.target as HTMLElement
+    el.style.opacity = '0.5'
+  }
 }
 
 function onTaskDragEnd(e: DragEvent) {
-  draggingTaskId.value = null
+  draggingTaskIds.value = []
   dragOverTaskId.value = null
   const el = e.target as HTMLElement
   el.style.opacity = ''
+  // Remove ghost element
+  if (ghostEl) {
+    document.body.removeChild(ghostEl)
+    ghostEl = null
+  }
 }
 
 function onTaskDragOver(e: DragEvent, task: FocusTask) {
-  if (draggingTaskId.value && draggingTaskId.value !== task.id) {
+  if (draggingTaskIds.value.length > 0 && !draggingTaskIds.value.includes(task.id)) {
     dragOverTaskId.value = task.id
     e.dataTransfer!.dropEffect = 'move'
   }
@@ -376,15 +453,17 @@ function onTaskDragLeave() {
 }
 
 function onTaskDrop(task: FocusTask) {
-  if (draggingTaskId.value && draggingTaskId.value !== task.id) {
-    store.reorderTask(draggingTaskId.value, task.id)
+  if (draggingTaskIds.value.length === 1 && draggingTaskIds.value[0] !== task.id) {
+    // Single task reorder
+    store.reorderTask(draggingTaskIds.value[0], task.id)
   }
+  // Batch drag into task list area: no reorder for batch
   dragOverTaskId.value = null
 }
 
 function handleTaskDrop(targetKey: string) {
-  const taskId = draggingTaskId.value
-  if (!taskId) return
+  const taskIds = draggingTaskIds.value
+  if (!taskIds.length) return
 
   const today = new Date()
   const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
@@ -392,53 +471,53 @@ function handleTaskDrop(targetKey: string) {
   tomorrow.setDate(tomorrow.getDate() + 1)
   const tomorrowDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
 
-  switch (targetKey) {
-    case 'today':
-      store.updateTask(taskId, { dueDate: todayDate })
-      break
-    case 'tomorrow':
-      store.updateTask(taskId, { dueDate: tomorrowDate })
-      break
-    case 'week': {
-      // Set to end of this week (Sunday)
-      const day = today.getDay()
-      const sunday = new Date(today)
-      sunday.setDate(today.getDate() + (7 - day))
-      const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`
-      store.updateTask(taskId, { dueDate: sundayStr })
-      break
-    }
-    case 'next7': {
-      // Set to 3 days from now
-      const d = new Date(today)
-      d.setDate(d.getDate() + 3)
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      store.updateTask(taskId, { dueDate: dateStr })
-      break
-    }
-    case 'high':
-      store.updateTask(taskId, { priority: 'high' })
-      break
-    case 'planned':
-      // Already has a date? keep it, otherwise set to today
-      const task = store.tasks.value.find(t => t.id === taskId)
-      if (task && !task.dueDate) {
+  for (const taskId of taskIds) {
+    switch (targetKey) {
+      case 'today':
         store.updateTask(taskId, { dueDate: todayDate })
+        break
+      case 'tomorrow':
+        store.updateTask(taskId, { dueDate: tomorrowDate })
+        break
+      case 'week': {
+        const day = today.getDay()
+        const sunday = new Date(today)
+        sunday.setDate(today.getDate() + (7 - day))
+        const sundayStr = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`
+        store.updateTask(taskId, { dueDate: sundayStr })
+        break
       }
-      break
-    case 'completed':
-      store.toggleTask(taskId)
-      break
-    case 'all':
-      // Just move, no specific change needed
-      break
-    default:
-      // Custom list - move task to that list
-      store.updateTask(taskId, { listId: targetKey })
-      break
+      case 'next7': {
+        const d = new Date(today)
+        d.setDate(d.getDate() + 3)
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        store.updateTask(taskId, { dueDate: dateStr })
+        break
+      }
+      case 'high':
+        store.updateTask(taskId, { priority: 'high' })
+        break
+      case 'planned': {
+        const task = store.tasks.value.find(t => t.id === taskId)
+        if (task && !task.dueDate) {
+          store.updateTask(taskId, { dueDate: todayDate })
+        }
+        break
+      }
+      case 'completed':
+        store.toggleTask(taskId)
+        break
+      case 'all':
+        break
+      default:
+        store.updateTask(taskId, { listId: targetKey })
+        break
+    }
   }
 
-  draggingTaskId.value = null
+  // Clear selection after batch operation
+  selectedTaskIds.value = new Set()
+  draggingTaskIds.value = []
 }
 provide('handleTaskDrop', handleTaskDrop)
 

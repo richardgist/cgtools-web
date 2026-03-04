@@ -1693,3 +1693,113 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ==============================
+   Batch Selection & Drag
+   ============================== */
+
+/* Batch toolbar */
+.focus-batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  background: rgba(229, 57, 53, 0.07);
+  border: 1px dashed rgba(229, 57, 53, 0.4);
+  border-radius: var(--focus-radius-md);
+  animation: focus-fadeInUp 0.2s ease;
+}
+
+.focus-batch-toolbar__info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--focus-red);
+  font-weight: 500;
+}
+
+.focus-batch-toolbar__clear {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid rgba(229, 57, 53, 0.3);
+  background: transparent;
+  border-radius: var(--focus-radius-sm);
+  font-size: 12px;
+  color: var(--focus-red);
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+}
+
+.focus-batch-toolbar__clear:hover {
+  background: rgba(229, 57, 53, 0.12);
+}
+
+/* Multi-select checkbox */
+.focus-task-item__multi-check {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--focus-radius-sm);
+  border: 2px solid var(--focus-border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--focus-transition-fast);
+  background: var(--focus-surface);
+}
+
+.focus-task-item__multi-check:hover {
+  border-color: var(--focus-red);
+}
+
+.focus-task-item__multi-check.checked {
+  background: var(--focus-red);
+  border-color: var(--focus-red);
+}
+
+.focus-task-item__multi-check.checked svg {
+  color: white;
+}
+
+/* Selected task highlight */
+.focus-task-item--selected {
+  background: rgba(229, 57, 53, 0.05) !important;
+  border-color: rgba(229, 57, 53, 0.3) !important;
+  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.08);
+}
+
+/* Drag ghost for batch drag */
+.focus-drag-ghost {
+  position: fixed;
+  top: -999px;
+  left: -999px;
+  padding: 8px 16px;
+  background: var(--focus-red);
+  color: white;
+  border-radius: var(--focus-radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--focus-font);
+  box-shadow: var(--focus-shadow-lg);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Sidebar drag-badge (batch count) */
+.focus-sidebar__drag-badge {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  background: var(--focus-red);
+  padding: 1px 7px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  animation: focus-fadeIn 0.15s ease;
+}

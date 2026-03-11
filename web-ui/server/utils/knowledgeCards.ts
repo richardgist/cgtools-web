@@ -243,6 +243,73 @@ export function deleteKnowledgeCard(id: string): boolean {
   return result.changes > 0
 }
 
+/** 查找重复卡片（按 title 分组，同标题多张即为重复） */
+export function findDuplicateCards(): {
+  groups: { title: string; keep: Omit<KnowledgeCardRecord, 'content'>; duplicates: Omit<KnowledgeCardRecord, 'content'>[] }[]
+  totalDuplicates: number
+} {
+  const db = getDb()
+  // 找出有重复 title 的所有卡片（按 id 升序，最小 id 的保留）
+  const rows = db.prepare(`
+    SELECT id, title, domain, difficulty, date, tags, summary, source, created_at
+    FROM knowledge_cards
+    WHERE title IN (
+      SELECT title FROM knowledge_cards GROUP BY title HAVING COUNT(*) > 1
+    )
+    ORDER BY title ASC, id ASC
+  `).all() as any[]
+
+  const groupMap = new Map<string, any[]>()
+  for (const row of rows) {
+    const card = {
+      id: row.id,
+      title: row.title,
+      domain: row.domain,
+      difficulty: row.difficulty,
+      date: row.date,
+      tags: JSON.parse(row.tags || '[]'),
+      summary: row.summary,
+      source: row.source || '',
+    }
+    if (!groupMap.has(row.title)) {
+      groupMap.set(row.title, [])
+    }
+    groupMap.get(row.title)!.push(card)
+  }
+
+  const groups: { title: string; keep: any; duplicates: any[] }[] = []
+  let totalDuplicates = 0
+
+  for (const [title, cards] of groupMap) {
+    const [keep, ...duplicates] = cards
+    groups.push({ title, keep, duplicates })
+    totalDuplicates += duplicates.length
+  }
+
+  return { groups, totalDuplicates }
+}
+
+/** 批量删除卡片 */
+export function batchDeleteCards(ids: string[]): { deleted: number; notFound: string[] } {
+  const db = getDb()
+  let deleted = 0
+  const notFound: string[] = []
+
+  const deleteTransaction = db.transaction(() => {
+    for (const id of ids) {
+      const result = db.prepare('DELETE FROM knowledge_cards WHERE id = ?').run(id)
+      if (result.changes > 0) {
+        deleted++
+      } else {
+        notFound.push(id)
+      }
+    }
+  })
+
+  deleteTransaction()
+  return { deleted, notFound }
+}
+
 /** 批量导入卡片（从 markdown 数组） */
 export function batchImportCards(
   items: { id: string; markdown: string }[],

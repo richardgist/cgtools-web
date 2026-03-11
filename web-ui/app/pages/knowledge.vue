@@ -6,6 +6,7 @@
         <span class="kc-badge">{{ filteredCards.length }} / {{ cards.length }} 张卡片</span>
         <button class="fluent-btn" @click="openCreateModal">新增卡片</button>
         <button class="fluent-btn" @click="openImportModal">📁 从文件夹导入</button>
+        <button class="fluent-btn" @click="openDeduplicateModal" style="color: #e67e22;">🧹 清理冗余</button>
         <button class="fluent-btn" @click="rebuildIndex" :disabled="loading || rebuildingIndex">
           {{ rebuildingIndex ? '重建索引中...' : '刷新索引' }}
         </button>
@@ -226,6 +227,78 @@
       </div>
     </Teleport>
 
+    <!-- Deduplicate Modal -->
+    <Teleport to="body">
+      <div v-if="deduplicateModalVisible" class="kc-modal-overlay" @click.self="closeDeduplicateModal">
+        <div class="kc-modal kc-create-modal" style="max-width: 720px;">
+          <button class="kc-modal-close" @click="closeDeduplicateModal">×</button>
+          <h2 class="kc-modal-title">🧹 清理冗余卡片</h2>
+
+          <div v-if="deduplicateLoading" class="kc-modal-loading">正在扫描重复卡片...</div>
+
+          <div v-else-if="deduplicateGroups.length === 0 && !deduplicateError" style="padding: 24px 0; text-align: center; color: #27ae60;">
+            <p style="font-size: 1.2em;">✅ 没有发现重复卡片，数据很干净！</p>
+          </div>
+
+          <div v-else>
+            <div v-if="deduplicateError" class="kc-create-error">{{ deduplicateError }}</div>
+
+            <p class="kc-create-hint" style="margin-bottom: 12px;">
+              发现 <strong>{{ deduplicateGroups.length }}</strong> 组重复，共 <strong style="color: #e74c3c;">{{ deduplicateTotalCount }}</strong> 张冗余卡片。
+              每组保留 ID 最小的（最早创建的），其余将被删除。
+            </p>
+
+            <!-- Select/Deselect All -->
+            <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
+              <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.9em;">
+                <input type="checkbox" :checked="allDuplicatesSelected" @change="toggleSelectAllDuplicates" />
+                全选 / 全不选
+              </label>
+              <span style="font-size: 0.85em; color: #888;">已选 {{ selectedDuplicateIds.size }} 张待删除</span>
+            </div>
+
+            <div class="kc-import-result-list" style="max-height: 400px; overflow-y: auto;">
+              <div v-for="(group, gi) in deduplicateGroups" :key="gi" class="kc-dedup-group">
+                <div class="kc-dedup-group-title">
+                  📄 {{ group.title }} <span style="color: #888; font-size: 0.85em;">({{ group.duplicates.length + 1 }} 张)</span>
+                </div>
+                <div class="kc-dedup-item keep">
+                  <span class="kc-dedup-icon">✅</span>
+                  <span class="kc-dedup-id">{{ group.keep.id }}</span>
+                  <span class="kc-dedup-label">保留</span>
+                </div>
+                <div v-for="dup in group.duplicates" :key="dup.id" class="kc-dedup-item duplicate">
+                  <label style="display: flex; align-items: center; gap: 6px; width: 100%; cursor: pointer;">
+                    <input type="checkbox" :checked="selectedDuplicateIds.has(dup.id)" @change="toggleDuplicateSelection(dup.id)" />
+                    <span class="kc-dedup-icon">🗑️</span>
+                    <span class="kc-dedup-id">{{ dup.id }}</span>
+                    <span class="kc-dedup-label" style="color: #e74c3c;">冗余</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="deduplicateResult" class="kc-import-summary" style="margin-top: 12px;">
+              ✅ 已删除 <strong>{{ deduplicateResult.deleted }}</strong> 张冗余卡片
+              <span v-if="deduplicateResult.notFound.length > 0" style="color: #f0ad4e;">，{{ deduplicateResult.notFound.length }} 张未找到</span>
+            </div>
+          </div>
+
+          <div class="kc-create-actions">
+            <button class="fluent-btn" @click="closeDeduplicateModal">关闭</button>
+            <button
+              v-if="deduplicateGroups.length > 0 && !deduplicateResult"
+              class="fluent-btn danger"
+              :disabled="deduplicateDeleting || selectedDuplicateIds.size === 0"
+              @click="executeDeduplicateDelete"
+            >
+              {{ deduplicateDeleting ? '删除中...' : `🗑️ 删除选中的 ${selectedDuplicateIds.size} 张冗余卡片` }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Import Folder Modal -->
     <Teleport to="body">
       <div v-if="importModalVisible" class="kc-modal-overlay" @click.self="closeImportModal">
@@ -340,6 +413,30 @@ const createAllowOverwrite = ref(false)
 const deleting = ref(false)
 const deleteConfirmVisible = ref(false)
 const deleteTargetCard = ref<KnowledgeCard | null>(null)
+
+// Deduplicate state
+interface DedupGroup {
+  title: string
+  keep: KnowledgeCard
+  duplicates: KnowledgeCard[]
+}
+const deduplicateModalVisible = ref(false)
+const deduplicateLoading = ref(false)
+const deduplicateError = ref('')
+const deduplicateGroups = ref<DedupGroup[]>([])
+const deduplicateTotalCount = ref(0)
+const deduplicateDeleting = ref(false)
+const deduplicateResult = ref<{ deleted: number; notFound: string[] } | null>(null)
+const selectedDuplicateIds = ref(new Set<string>())
+
+const allDuplicatesSelected = computed(() => {
+  if (deduplicateGroups.value.length === 0) return false
+  let total = 0
+  for (const g of deduplicateGroups.value) {
+    total += g.duplicates.length
+  }
+  return total > 0 && selectedDuplicateIds.value.size === total
+})
 
 // Import folder state
 const importModalVisible = ref(false)
@@ -668,6 +765,101 @@ async function executeDelete() {
     alert(e?.data?.statusMessage || e?.message || '删除失败')
   } finally {
     deleting.value = false
+  }
+}
+
+// Deduplicate
+async function openDeduplicateModal() {
+  deduplicateModalVisible.value = true
+  deduplicateLoading.value = true
+  deduplicateError.value = ''
+  deduplicateGroups.value = []
+  deduplicateTotalCount.value = 0
+  deduplicateResult.value = null
+  selectedDuplicateIds.value = new Set()
+
+  try {
+    const data = await $fetch<{
+      groups: DedupGroup[]
+      totalDuplicates: number
+    }>('/api/knowledge/find-duplicates')
+    deduplicateGroups.value = data.groups || []
+    deduplicateTotalCount.value = data.totalDuplicates || 0
+
+    // 默认全选所有冗余卡片
+    const ids = new Set<string>()
+    for (const g of data.groups || []) {
+      for (const dup of g.duplicates) {
+        ids.add(dup.id)
+      }
+    }
+    selectedDuplicateIds.value = ids
+  } catch (e: any) {
+    deduplicateError.value = e?.data?.statusMessage || e?.message || '扫描失败'
+  } finally {
+    deduplicateLoading.value = false
+  }
+}
+
+function closeDeduplicateModal() {
+  deduplicateModalVisible.value = false
+}
+
+function toggleDuplicateSelection(id: string) {
+  const s = new Set(selectedDuplicateIds.value)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    s.add(id)
+  }
+  selectedDuplicateIds.value = s
+}
+
+function toggleSelectAllDuplicates() {
+  if (allDuplicatesSelected.value) {
+    selectedDuplicateIds.value = new Set()
+  } else {
+    const ids = new Set<string>()
+    for (const g of deduplicateGroups.value) {
+      for (const dup of g.duplicates) {
+        ids.add(dup.id)
+      }
+    }
+    selectedDuplicateIds.value = ids
+  }
+}
+
+async function executeDeduplicateDelete() {
+  const ids = Array.from(selectedDuplicateIds.value)
+  if (ids.length === 0) return
+
+  deduplicateDeleting.value = true
+  deduplicateError.value = ''
+
+  try {
+    const data = await $fetch<{
+      deleted: number
+      notFound: string[]
+      cardsCount: number
+    }>('/api/knowledge/batch-delete', {
+      method: 'POST',
+      body: { ids },
+    })
+
+    deduplicateResult.value = { deleted: data.deleted, notFound: data.notFound || [] }
+
+    // 清除已删除的分组
+    for (const g of deduplicateGroups.value) {
+      g.duplicates = g.duplicates.filter(d => !selectedDuplicateIds.value.has(d.id))
+    }
+    deduplicateGroups.value = deduplicateGroups.value.filter(g => g.duplicates.length > 0)
+    selectedDuplicateIds.value = new Set()
+
+    await refreshCards()
+  } catch (e: any) {
+    deduplicateError.value = e?.data?.statusMessage || e?.message || '删除失败'
+  } finally {
+    deduplicateDeleting.value = false
   }
 }
 
@@ -1658,5 +1850,55 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Deduplicate styles */
+.kc-dedup-group {
+  margin-bottom: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.kc-dedup-group-title {
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 0.9em;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.kc-dedup-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 0.85em;
+}
+.kc-dedup-item.keep {
+  background: rgba(46, 204, 113, 0.08);
+}
+.kc-dedup-item.duplicate {
+  background: rgba(231, 76, 60, 0.05);
+}
+.kc-dedup-item.duplicate:hover {
+  background: rgba(231, 76, 60, 0.1);
+}
+.kc-dedup-icon {
+  flex-shrink: 0;
+}
+.kc-dedup-id {
+  font-family: monospace;
+  font-size: 0.9em;
+  color: #aaa;
+}
+.kc-dedup-label {
+  font-size: 0.8em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(46, 204, 113, 0.15);
+  color: #27ae60;
+}
+.kc-dedup-item.duplicate .kc-dedup-label {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
 }
 </style>

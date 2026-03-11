@@ -1,3 +1,4 @@
+// POST /api/knowledge/rebuild - 重建索引（现在其实就是重新查库）
 import { buildKnowledgeIndex } from '../../utils/knowledgeCards'
 
 export default defineEventHandler(async () => {
@@ -5,8 +6,7 @@ export default defineEventHandler(async () => {
     const index = buildKnowledgeIndex()
     return {
       ok: true,
-      updated_at: index.updated_at,
-      cards_count: index.cards.length,
+      cardsCount: index.cards.length,
     }
   } catch (e: any) {
     throw createError({

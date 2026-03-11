@@ -1,3 +1,4 @@
+// POST /api/knowledge/create - 创建或更新卡片
 import { createKnowledgeCardFromMarkdown } from '../../utils/knowledgeCards'
 
 interface CreateKnowledgeCardBody {

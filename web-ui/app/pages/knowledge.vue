@@ -79,15 +79,24 @@
         <!-- Date Filter -->
         <div class="kc-filter-section">
           <div class="kc-filter-title">日期</div>
+          <div class="kc-date-tabs">
+            <button
+              v-for="tab in dateTabOptions"
+              :key="tab.key"
+              class="kc-date-tab"
+              :class="{ active: dateTabMode === tab.key }"
+              @click="dateTabMode = tab.key"
+            >{{ tab.label }}</button>
+          </div>
           <div class="kc-date-filters">
             <span
-              v-for="([date, count]) in dateCounts"
-              :key="date"
+              v-for="item in dateGroupItems"
+              :key="item.key"
               class="kc-date-item"
-              :class="{ active: activeDates.has(date) }"
-              @click="toggleDate(date)"
+              :class="{ active: activeDateKeys.has(item.key) }"
+              @click="toggleDateKey(item.key)"
             >
-              {{ date }} ({{ count }})
+              {{ item.label }} ({{ item.count }})
             </span>
           </div>
         </div>
@@ -276,7 +285,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 
 interface KnowledgeCard {
   id: string
@@ -286,7 +295,6 @@ interface KnowledgeCard {
   date: string
   tags: string[]
   summary: string
-  file: string
   source?: string
 }
 
@@ -296,7 +304,19 @@ const rebuildingIndex = ref(false)
 const searchText = ref('')
 const activeDomains = ref(new Set<string>())
 const activeDifficulties = ref(new Set<number>())
-const activeDates = ref(new Set<string>())
+const activeDateKeys = ref(new Set<string>())
+const dateTabMode = ref<'year' | 'month' | 'week' | 'day'>('month')
+const dateTabOptions = [
+  { key: 'year' as const, label: '年' },
+  { key: 'month' as const, label: '月' },
+  { key: 'week' as const, label: '周' },
+  { key: 'day' as const, label: '日' },
+]
+
+// 切换维度时自动清除日期筛选
+watch(dateTabMode, () => {
+  activeDateKeys.value = new Set()
+})
 const activeTags = ref(new Set<string>())
 
 const selectedCard = ref<KnowledgeCard | null>(null)
@@ -368,15 +388,80 @@ const uniqueDates = computed(() => {
   return dates.size
 })
 
-const dateCounts = computed(() => {
+/** 获取 ISO 周编号 */
+function getISOWeekKey(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00')
+  if (isNaN(d.getTime())) return ''
+  // 计算 ISO 周: 参考 https://en.wikipedia.org/wiki/ISO_week_date
+  const jan4 = new Date(d.getFullYear(), 0, 4)
+  const dayOfYear = Math.floor((d.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 86400000) + 1
+  const weekDay = d.getDay() || 7 // Monday=1 ... Sunday=7
+  const weekNum = Math.ceil((dayOfYear - weekDay + 10) / 7)
+  // 处理跨年：week可能为0或53+
+  if (weekNum < 1) {
+    return `${d.getFullYear() - 1}-W53`
+  }
+  if (weekNum > 52) {
+    const dec28 = new Date(d.getFullYear(), 11, 28)
+    const maxWeek = Math.ceil((Math.floor((dec28.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 86400000) + 1 - ((dec28.getDay() || 7)) + 10) / 7)
+    if (weekNum > maxWeek) {
+      return `${d.getFullYear() + 1}-W01`
+    }
+  }
+  return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`
+}
+
+/** 获取周的日期范围标签 */
+function getWeekRangeLabel(weekKey: string): string {
+  // weekKey 格式: 2026-W09
+  const match = weekKey.match(/^(\d{4})-W(\d{2})$/)
+  if (!match) return weekKey
+  const year = Number(match[1])
+  const week = Number(match[2])
+  // 根据 ISO week 反算周一日期
+  const jan4 = new Date(year, 0, 4)
+  const jan4Day = jan4.getDay() || 7
+  const mondayOfWeek1 = new Date(jan4.getTime() - (jan4Day - 1) * 86400000)
+  const monday = new Date(mondayOfWeek1.getTime() + (week - 1) * 7 * 86400000)
+  const sunday = new Date(monday.getTime() + 6 * 86400000)
+  const fmt = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`
+  return `${fmt(monday)}~${fmt(sunday)}`
+}
+
+/** 将卡片日期转换为各维度的 key */
+function getDateKey(dateStr: string, mode: 'year' | 'month' | 'week' | 'day'): string {
+  if (!dateStr) return ''
+  switch (mode) {
+    case 'year': return dateStr.slice(0, 4) // 2026
+    case 'month': return dateStr.slice(0, 7) // 2026-02
+    case 'week': return getISOWeekKey(dateStr) // 2026-W09
+    case 'day': return dateStr // 2026-02-26
+  }
+}
+
+/** 根据当前 tab 模式生成分组列表 */
+const dateGroupItems = computed(() => {
+  const mode = dateTabMode.value
   const counts: Record<string, number> = {}
   for (const c of cards.value) {
-    if (!c.date) continue
-    counts[c.date] = (counts[c.date] || 0) + 1
+    const key = getDateKey(c.date, mode)
+    if (!key) continue
+    counts[key] = (counts[key] || 0) + 1
   }
   return Object.entries(counts)
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .slice(0, 30)
+    .map(([key, count]) => {
+      let label = key
+      if (mode === 'year') {
+        label = `${key}年`
+      } else if (mode === 'month') {
+        label = key // 2026-02
+      } else if (mode === 'week') {
+        label = `${key} (${getWeekRangeLabel(key)})`
+      }
+      // day: 直接显示日期
+      return { key, label, count }
+    })
 })
 
 const topTags = computed(() => {
@@ -404,8 +489,11 @@ const filteredCards = computed(() => {
     if (activeDomains.value.size > 0 && !activeDomains.value.has(card.domain)) return false
     // Difficulty
     if (activeDifficulties.value.size > 0 && !activeDifficulties.value.has(card.difficulty)) return false
-    // Date
-    if (activeDates.value.size > 0 && !activeDates.value.has(card.date)) return false
+    // Date (multi-dimension)
+    if (activeDateKeys.value.size > 0) {
+      const cardKey = getDateKey(card.date, dateTabMode.value)
+      if (!activeDateKeys.value.has(cardKey)) return false
+    }
     // Tags
     if (activeTags.value.size > 0) {
       const cardTags = new Set(card.tags || [])
@@ -432,10 +520,10 @@ function toggleDifficulty(d: number) {
   activeDifficulties.value = s
 }
 
-function toggleDate(date: string) {
-  const s = new Set(activeDates.value)
-  if (s.has(date)) s.delete(date); else s.add(date)
-  activeDates.value = s
+function toggleDateKey(key: string) {
+  const s = new Set(activeDateKeys.value)
+  if (s.has(key)) s.delete(key); else s.add(key)
+  activeDateKeys.value = s
 }
 
 function toggleTag(tag: string) {
@@ -448,7 +536,7 @@ function resetFilters() {
   searchText.value = ''
   activeDomains.value = new Set()
   activeDifficulties.value = new Set()
-  activeDates.value = new Set()
+  activeDateKeys.value = new Set()
   activeTags.value = new Set()
 }
 
@@ -805,11 +893,41 @@ onMounted(() => {
 }
 
 /* Date */
+.kc-date-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.kc-date-tab {
+  flex: 1;
+  padding: 4px 0;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+.kc-date-tab:hover {
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.06);
+}
+.kc-date-tab.active {
+  background: rgba(96, 205, 255, 0.18);
+  color: var(--accent-default);
+}
+
 .kc-date-filters {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 180px;
+  gap: 4px;
+  max-height: 200px;
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -822,6 +940,9 @@ onMounted(() => {
   cursor: pointer;
   transition: all 0.2s;
   border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kc-date-item:hover { background: rgba(255,255,255,0.1); }
 .kc-date-item.active {

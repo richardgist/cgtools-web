@@ -1,3 +1,4 @@
+// GET /api/knowledge - 获取全部卡片索引
 import { buildKnowledgeIndex } from '../../utils/knowledgeCards'
 
 export default defineEventHandler(async () => {

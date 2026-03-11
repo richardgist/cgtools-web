@@ -231,28 +231,13 @@
       <div v-if="importModalVisible" class="kc-modal-overlay" @click.self="closeImportModal">
         <div class="kc-modal kc-create-modal">
           <button class="kc-modal-close" @click="closeImportModal">×</button>
-          <h2 class="kc-modal-title">📁 从本地文件夹导入</h2>
+          <h2 class="kc-modal-title">📁 文件夹导入与序号整理</h2>
           <p class="kc-create-hint">
-            请选择本地包含知识卡片的文件夹，系统将在浏览器读取 .md 文件内容并上传到云端。文件需包含 frontmatter 中的 id 字段，或文件名符合 KC-YYYY-MM-DD-NNN 格式。
+            此操作将读取您的本地文件夹，推算当天的最新卡片序号，<strong>自动处理并更新您本地的卡片文件名及文件内的 ID</strong>，最后同步上传到云端系统。
           </p>
-          <div class="kc-import-field">
-            <label class="kc-import-label">选择本地文件夹</label>
-            <input
-              type="file"
-              webkitdirectory
-              directory
-              multiple
-              class="fluent-input"
-              style="width: 100%;"
-              @change="handleImportFileSelect"
-            />
-            <div v-if="selectedImportFiles.length > 0" style="margin-top: 8px; font-size: 11px; color: var(--text-tertiary);">
-              已选择 {{ selectedImportFiles.length }} 个 .md 文件准备导入
-            </div>
-          </div>
           <label class="kc-create-overwrite">
             <input v-model="importAllowOverwrite" type="checkbox" />
-            id 已存在时允许覆盖
+            冲突时覆盖云端数据 (若不勾选，则为本地冲突文件分配全新的序号并重命名)
           </label>
           <div v-if="importError" class="kc-create-error">{{ importError }}</div>
 
@@ -283,8 +268,8 @@
 
           <div class="kc-create-actions">
             <button class="fluent-btn" @click="closeImportModal">关闭</button>
-            <button class="fluent-btn" :disabled="importSubmitting || selectedImportFiles.length === 0" @click="submitImport">
-              {{ importSubmitting ? '导入中...' : '开始上传并导入' }}
+            <button class="fluent-btn primary" :disabled="importSubmitting" @click="handleDirectoryImport">
+              {{ importSubmitting ? '整理并上传中...' : '📂 选择本地文件夹并开始' }}
             </button>
           </div>
         </div>
@@ -345,7 +330,6 @@ const deleteTargetCard = ref<KnowledgeCard | null>(null)
 
 // Import folder state
 const importModalVisible = ref(false)
-const selectedImportFiles = ref<File[]>([])
 const importAllowOverwrite = ref(false)
 const importSubmitting = ref(false)
 const importError = ref('')
@@ -676,7 +660,6 @@ async function executeDelete() {
 function openImportModal() {
   importModalVisible.value = true
   importError.value = ''
-  selectedImportFiles.value = []
   importResults.value = []
   importTotalFiles.value = 0
   importedCount.value = 0
@@ -687,21 +670,11 @@ function openImportModal() {
 function closeImportModal() {
   importModalVisible.value = false
   importError.value = ''
-  selectedImportFiles.value = []
 }
 
-function handleImportFileSelect(e: Event) {
-  const target = e.target as HTMLInputElement
-  if (!target || !target.files) return
-
-  // Filter only .md files
-  const filesArray = Array.from(target.files)
-  selectedImportFiles.value = filesArray.filter(f => f.name.toLowerCase().endsWith('.md'))
-}
-
-async function submitImport() {
-  if (selectedImportFiles.value.length === 0) {
-    importError.value = '请先选择包含 .md 文件的文件夹'
+async function handleDirectoryImport() {
+  if (!(window as any).showDirectoryPicker) {
+    importError.value = '您的浏览器不支持本地目录读写 API，请使用 Chrome 或 Edge 浏览器。'
     return
   }
 
@@ -710,47 +683,160 @@ async function submitImport() {
   importResults.value = []
 
   try {
-    // Read all selected file contents
-    const filePayloads = await Promise.all(
-      selectedImportFiles.value.map(async (file) => {
-        const content = await file.text()
-        return { filename: file.name, content }
-      })
-    )
+    const dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
+    
+    // 获取当天的前缀
+    const dDate = new Date()
+    const yyyy = dDate.getFullYear()
+    const MM = String(dDate.getMonth() + 1).padStart(2, '0')
+    const dd = String(dDate.getDate()).padStart(2, '0')
+    const prefix = `KC-${yyyy}-${MM}-${dd}-`
 
-    const data = await $fetch<{
-      ok: boolean
-      imported: number
-      skipped: number
-      errors: number
-      totalFiles: number
-      cardsCount: number
-      results: { filename: string; id: string; status: string; message?: string }[]
-      message?: string
-    }>('/api/knowledge/import-files', {
-      method: 'POST',
-      body: {
-        files: filePayloads,
-        overwrite: importAllowOverwrite.value,
-      },
-    })
-
-    importResults.value = data.results || []
-    importTotalFiles.value = data.totalFiles || 0
-    importedCount.value = data.imported || 0
-    skippedCount.value = data.skipped || 0
-    errorsCount.value = data.errors || 0
-
-    if (data.message) {
-      importError.value = data.message
+    // 获取云端卡片列表
+    const indexData = await $fetch<{ version: number, cards: any[] }>('/api/knowledge')
+    const existingIds = new Set(indexData.cards?.map(c => c.id) || [])
+    
+    let maxSeq = 0
+    for (const id of existingIds) {
+      if (id.startsWith(prefix)) {
+        const parts = id.split('-')
+        const seq = parseInt(parts[parts.length - 1], 10)
+        if (!isNaN(seq) && seq > maxSeq) {
+          maxSeq = seq
+        }
+      }
     }
+    
+    const filePayloads: { filename: string, content: string }[] = []
+    const resultsPreview: { status: string, filename: string, message: string, id: string }[] = []
+    
+    for await (const entry of (dirHandle as any).values()) {
+      if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.md')) {
+        const fileHandle = entry
+        const file = await fileHandle.getFile()
+        const content = await file.text()
+        
+        const normalized = content.replace(/^\ufeff/, '')
+        const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
+        
+        let existingFileId = ''
+        if (match) {
+          const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+          if (idMatch) {
+            existingFileId = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+          }
+        }
+        
+        const baseNameId = file.name.replace(/\.md$/i, '')
+        const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
+        
+        const effectiveId = existingFileId && CARD_ID_PATTERN.test(existingFileId) ? existingFileId 
+            : (CARD_ID_PATTERN.test(baseNameId) ? baseNameId : '')
+            
+        let chosenId = effectiveId
+        let needUpdateFile = false
+        
+        // 自动分配新序号：1.完全没序号 2.在云端存在且不想覆盖 3.前缀不对(跨天等，这里暂时只判断冲突)
+        if (!chosenId || (existingIds.has(chosenId) && !importAllowOverwrite.value)) {
+          maxSeq++
+          chosenId = `${prefix}${String(maxSeq).padStart(3, '0')}`
+          needUpdateFile = true
+          existingIds.add(chosenId)
+        } else if (chosenId !== existingFileId || entry.name !== `${chosenId}.md`) {
+          // 有效序号，但文件名不同或内容 frontmatter 中不一致，则强制修复
+          needUpdateFile = true
+        }
 
-    // 如果有导入成功的，刷新列表
-    if ((data.imported || 0) > 0) {
-      await refreshCards()
+        let newContent = content
+        if (needUpdateFile) {
+          if (!match) { // 无 frontmatter
+            newContent = `---\nid: ${chosenId}\ntitle: ${baseNameId}\n---\n\n${normalized}`
+          } else {
+            const fmContent = match[1]
+            const body = match[2]
+            let newFm = fmContent
+            if (/^id\s*:/m.test(fmContent)) {
+              newFm = fmContent.replace(/^id\s*:.*$/m, `id: ${chosenId}`)
+            } else {
+              newFm = `id: ${chosenId}\n${fmContent}`
+            }
+            newContent = `---\n${newFm}\n---\n${body}`
+          }
+          
+          try {
+            if (entry.name !== `${chosenId}.md`) {
+              // 重命名逻辑：新建 + 删除旧的
+              const newFileHandle = await dirHandle.getFileHandle(`${chosenId}.md`, { create: true })
+              const writable = await newFileHandle.createWritable()
+              await writable.write(newContent)
+              await writable.close()
+              
+              await dirHandle.removeEntry(entry.name)
+              resultsPreview.push({ status: 'imported', id: chosenId, filename: entry.name, message: `已重命名为 ${chosenId}.md 并规范内容` })
+            } else {
+              // 修改同名文件
+              const writable = await fileHandle.createWritable()
+              await writable.write(newContent)
+              await writable.close()
+              resultsPreview.push({ status: 'imported', id: chosenId, filename: entry.name, message: `已更新文件内的 ID 为 ${chosenId}` })
+            }
+          } catch(err: any) {
+             resultsPreview.push({ status: 'error', id: chosenId, filename: entry.name, message: `本地文件修改失败: ${err.message}` })
+          }
+        }
+        
+        filePayloads.push({ filename: `${chosenId}.md`, content: newContent })
+      }
+    }
+    
+    if (filePayloads.length > 0) {
+      const data = await $fetch<{
+        ok: boolean
+        imported: number
+        skipped: number
+        errors: number
+        totalFiles: number
+        cardsCount: number
+        results: { filename: string; id: string; status: string; message?: string }[]
+        message?: string
+      }>('/api/knowledge/import-files', {
+        method: 'POST',
+        body: {
+          files: filePayloads,
+          overwrite: importAllowOverwrite.value,
+        },
+      })
+      
+      // 合并前端本地记录与服务端反馈 (去重以便不显示两次相同的提示，但简单起见直接拼接)
+      const finalResults = [...resultsPreview]
+      for (const r of data.results || []) {
+        // 如果前面本地已经有报告了，就不必重复报告成功，只报告服务端的错误即可
+        if (r.status !== 'imported' && r.status !== 'overwritten') {
+           finalResults.push(r as any)
+        } else if (!resultsPreview.find(p => p.id === r.id)) {
+           finalResults.push(r as any)
+        }
+      }
+
+      importResults.value = finalResults
+      importTotalFiles.value = data.totalFiles || 0
+      importedCount.value = data.imported || 0
+      skippedCount.value = data.skipped || 0
+      errorsCount.value = data.errors || 0
+      if (data.message) importError.value = data.message
+      
+      if ((data.imported || 0) > 0) {
+        await refreshCards()
+      }
+    } else {
+      importError.value = '没有找到需要导入的 .md 文件'
     }
   } catch (e: any) {
-    importError.value = e?.data?.statusMessage || e?.message || '导入失败'
+    if (e.name === 'AbortError') {
+      importError.value = '文件操作已被取消'
+    } else {
+      importError.value = '操作出错: ' + (e.message || String(e))
+    }
   } finally {
     importSubmitting.value = false
   }

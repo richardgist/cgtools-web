@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
 
 export interface KnowledgeCardRecord {
@@ -22,7 +22,8 @@ export interface KnowledgeIndex {
 export const CARDS_DIR = String.raw`C:\Users\jesephjiang\Documents\Obsidian Vault\TechDebriefs\knowledge-cards`
 
 const INDEX_PATH = resolve(CARDS_DIR, '_index.json')
-const CARD_FILE_PATTERN = /^KC-\d{4}-\d{2}-\d{2}-\d{3}\.md$/
+export const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
+const CARD_FILE_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}\.md$/
 
 type FrontmatterValue = string | number | string[]
 
@@ -69,6 +70,12 @@ const parseFrontmatter = (content: string) => {
   }
 
   return { meta, body: match[2] }
+}
+
+const createKnowledgeError = (statusCode: number, message: string) => {
+  const error = new Error(message) as Error & { statusCode: number }
+  error.statusCode = statusCode
+  return error
 }
 
 const extractSummary = (body: string) => {
@@ -124,4 +131,40 @@ export const buildKnowledgeIndex = (): KnowledgeIndex => {
   }
 
   return index
+}
+
+export const createKnowledgeCardFromMarkdown = (markdown: string, overwrite = false) => {
+  const normalized = markdown.replace(/^\ufeff/, '').trim()
+  if (!normalized) {
+    throw createKnowledgeError(400, 'Card markdown is empty')
+  }
+
+  const { meta } = parseFrontmatter(normalized)
+  const id = typeof meta.id === 'string' ? meta.id.trim() : ''
+  if (!id) {
+    throw createKnowledgeError(400, 'Card frontmatter must include id')
+  }
+
+  if (!CARD_ID_PATTERN.test(id)) {
+    throw createKnowledgeError(400, 'Card id must match KC-YYYY-MM-DD-NNN or KC-YYYY_MM_DD_NNN')
+  }
+
+  const filename = `${id}.md`
+  const filePath = resolve(CARDS_DIR, filename)
+  const alreadyExists = existsSync(filePath)
+
+  if (alreadyExists && !overwrite) {
+    throw createKnowledgeError(409, `Card already exists: ${id}`)
+  }
+
+  const persisted = normalized.endsWith('\n') ? normalized : `${normalized}\n`
+  writeFileSync(filePath, persisted, 'utf-8')
+  const index = buildKnowledgeIndex()
+
+  return {
+    id,
+    file: filename,
+    created: !alreadyExists,
+    index,
+  }
 }

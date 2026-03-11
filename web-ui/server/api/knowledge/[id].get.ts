@@ -1,7 +1,7 @@
 // GET /api/knowledge/:id - 获取单张卡片的 Markdown 内容
 import { readFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
-import { CARDS_DIR } from '../../utils/knowledgeCards'
+import { CARD_ID_PATTERN, CARDS_DIR } from '../../utils/knowledgeCards'
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
@@ -10,8 +10,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Missing card id' })
   }
 
-  // Sanitize: only allow KC-YYYY-MM-DD-NNN pattern
-  if (!/^KC-\d{4}-\d{2}-\d{2}-\d{3}$/.test(id)) {
+  // Sanitize: only allow KC-YYYY-MM-DD-NNN / KC-YYYY_MM_DD_NNN pattern
+  if (!CARD_ID_PATTERN.test(id)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid card id format' })
   }
 

@@ -4,7 +4,11 @@
       <h1 class="header-title">知识卡片</h1>
       <div class="header-controls">
         <span class="kc-badge">{{ filteredCards.length }} / {{ cards.length }} 张卡片</span>
-        <button class="fluent-btn" @click="refreshCards" :disabled="loading">
+        <button class="fluent-btn" @click="openCreateModal">新增卡片</button>
+        <button class="fluent-btn" @click="rebuildIndex" :disabled="loading || rebuildingIndex">
+          {{ rebuildingIndex ? '重建索引中...' : '刷新索引' }}
+        </button>
+        <button class="fluent-btn" @click="refreshCards" :disabled="loading || rebuildingIndex">
           {{ loading ? '加载中...' : '刷新' }}
         </button>
       </div>
@@ -140,6 +144,35 @@
       </div>
     </div>
 
+    <!-- Create Modal -->
+    <Teleport to="body">
+      <div v-if="createModalVisible" class="kc-modal-overlay" @click.self="closeCreateModal">
+        <div class="kc-modal kc-create-modal">
+          <button class="kc-modal-close" @click="closeCreateModal">×</button>
+          <h2 class="kc-modal-title">粘贴卡片全文并创建</h2>
+          <p class="kc-create-hint">
+            支持粘贴包含 frontmatter（如 id/title/date/tags）的完整 Markdown 内容，提交后会写入卡片目录并自动刷新索引。
+          </p>
+          <textarea
+            v-model="newCardMarkdown"
+            class="kc-create-textarea"
+            placeholder="请粘贴完整知识卡片内容..."
+          />
+          <label class="kc-create-overwrite">
+            <input v-model="createAllowOverwrite" type="checkbox" />
+            id 已存在时允许覆盖
+          </label>
+          <div v-if="createCardError" class="kc-create-error">{{ createCardError }}</div>
+          <div class="kc-create-actions">
+            <button class="fluent-btn" @click="closeCreateModal">取消</button>
+            <button class="fluent-btn" :disabled="createSubmitting" @click="submitCreateCard">
+              {{ createSubmitting ? '创建中...' : '创建卡片' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Detail Modal -->
     <Teleport to="body">
       <div v-if="selectedCard" class="kc-modal-overlay" @click.self="closeModal">
@@ -180,6 +213,7 @@ interface KnowledgeCard {
 
 const cards = ref<KnowledgeCard[]>([])
 const loading = ref(false)
+const rebuildingIndex = ref(false)
 const searchText = ref('')
 const activeDomains = ref(new Set<string>())
 const activeDifficulties = ref(new Set<number>())
@@ -189,6 +223,11 @@ const activeTags = ref(new Set<string>())
 const selectedCard = ref<KnowledgeCard | null>(null)
 const cardContentHtml = ref('')
 const cardContentLoading = ref(false)
+const createModalVisible = ref(false)
+const newCardMarkdown = ref('')
+const createSubmitting = ref(false)
+const createCardError = ref('')
+const createAllowOverwrite = ref(false)
 
 // Domain colors
 const DOMAIN_COLORS: Record<string, string> = {
@@ -331,6 +370,63 @@ async function refreshCards() {
   }
 }
 
+async function rebuildIndex() {
+  rebuildingIndex.value = true
+  try {
+    await $fetch('/api/knowledge/rebuild', { method: 'POST' })
+    await refreshCards()
+  } catch (e) {
+    console.error('Failed to rebuild knowledge index:', e)
+  } finally {
+    rebuildingIndex.value = false
+  }
+}
+
+function openCreateModal() {
+  createModalVisible.value = true
+  createCardError.value = ''
+}
+
+function closeCreateModal() {
+  createModalVisible.value = false
+  createCardError.value = ''
+}
+
+async function submitCreateCard() {
+  const markdown = newCardMarkdown.value.trim()
+  if (!markdown) {
+    createCardError.value = '请输入卡片内容'
+    return
+  }
+
+  createSubmitting.value = true
+  createCardError.value = ''
+
+  try {
+    const data = await $fetch<{ id: string }>('/api/knowledge/create', {
+      method: 'POST',
+      body: {
+        markdown,
+        overwrite: createAllowOverwrite.value,
+      },
+    })
+
+    await refreshCards()
+    closeCreateModal()
+    newCardMarkdown.value = ''
+    createAllowOverwrite.value = false
+
+    const createdCard = cards.value.find(card => card.id === data.id)
+    if (createdCard) {
+      await openCard(createdCard)
+    }
+  } catch (e: any) {
+    createCardError.value = e?.data?.statusMessage || e?.message || '创建卡片失败'
+  } finally {
+    createSubmitting.value = false
+  }
+}
+
 // Open card detail
 async function openCard(card: KnowledgeCard) {
   selectedCard.value = card
@@ -398,7 +494,12 @@ function markdownToHtml(md: string): string {
 
 // Keyboard
 function onKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && selectedCard.value) closeModal()
+  if (e.key !== 'Escape') return
+  if (createModalVisible.value) {
+    closeCreateModal()
+    return
+  }
+  if (selectedCard.value) closeModal()
 }
 
 onMounted(() => {
@@ -761,6 +862,53 @@ onMounted(() => {
   color: var(--text-tertiary);
   font-size: 14px;
   padding: 20px 0;
+}
+
+.kc-create-modal {
+  max-width: 900px;
+}
+
+.kc-create-hint {
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.kc-create-textarea {
+  width: 100%;
+  min-height: 360px;
+  background: #121212;
+  border: 1px solid var(--control-stroke);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 12px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.kc-create-overwrite {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.kc-create-error {
+  margin-top: 10px;
+  color: #ff99a4;
+  font-size: 12px;
+}
+
+.kc-create-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* Modal body markdown */

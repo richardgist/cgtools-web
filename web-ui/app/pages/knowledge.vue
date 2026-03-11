@@ -5,6 +5,7 @@
       <div class="header-controls">
         <span class="kc-badge">{{ filteredCards.length }} / {{ cards.length }} 张卡片</span>
         <button class="fluent-btn" @click="openCreateModal">新增卡片</button>
+        <button class="fluent-btn" @click="openImportModal">📁 从文件夹导入</button>
         <button class="fluent-btn" @click="rebuildIndex" :disabled="loading || rebuildingIndex">
           {{ rebuildingIndex ? '重建索引中...' : '刷新索引' }}
         </button>
@@ -184,12 +185,90 @@
             <span class="kc-card-diff">{{ '⭐'.repeat(selectedCard.difficulty || 1) }}</span>
             <span class="kc-card-date">{{ selectedCard.date }}</span>
             <span v-if="selectedCard.source" class="kc-modal-source">📎 {{ selectedCard.source }}</span>
+            <button class="fluent-btn danger kc-delete-btn" @click="confirmDeleteCard" :disabled="deleting">
+              {{ deleting ? '删除中...' : '🗑️ 删除' }}
+            </button>
           </div>
           <div class="kc-card-tags" style="margin-bottom:16px;">
             <span v-for="tag in (selectedCard.tags || [])" :key="tag" class="kc-card-tag">{{ tag }}</span>
           </div>
           <div v-if="cardContentLoading" class="kc-modal-loading">加载内容中...</div>
           <div v-else class="kc-modal-body" v-html="cardContentHtml"></div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Delete Confirm Modal -->
+    <Teleport to="body">
+      <div v-if="deleteConfirmVisible" class="kc-modal-overlay" @click.self="cancelDelete">
+        <div class="kc-modal kc-confirm-modal">
+          <h2 class="kc-modal-title">确认删除</h2>
+          <p class="kc-confirm-text">确定要删除卡片 <strong>{{ deleteTargetCard?.title }}</strong>（{{ deleteTargetCard?.id }}）吗？此操作不可撤销。</p>
+          <div class="kc-create-actions">
+            <button class="fluent-btn" @click="cancelDelete">取消</button>
+            <button class="fluent-btn danger" :disabled="deleting" @click="executeDelete">
+              {{ deleting ? '删除中...' : '确认删除' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Import Folder Modal -->
+    <Teleport to="body">
+      <div v-if="importModalVisible" class="kc-modal-overlay" @click.self="closeImportModal">
+        <div class="kc-modal kc-create-modal">
+          <button class="kc-modal-close" @click="closeImportModal">×</button>
+          <h2 class="kc-modal-title">📁 从文件夹导入</h2>
+          <p class="kc-create-hint">
+            指定本地文件夹路径，系统将扫描其中的 .md 文件并自动导入为知识卡片。文件需包含 frontmatter 中的 id 字段，或文件名符合 KC-YYYY-MM-DD-NNN 格式。
+          </p>
+          <div class="kc-import-field">
+            <label class="kc-import-label">文件夹路径</label>
+            <input
+              v-model="importFolderPath"
+              class="fluent-input"
+              style="width: 100%;"
+              placeholder="例如：C:\\Users\\xxx\\Documents\\cards"
+            />
+          </div>
+          <label class="kc-create-overwrite">
+            <input v-model="importAllowOverwrite" type="checkbox" />
+            id 已存在时允许覆盖
+          </label>
+          <div v-if="importError" class="kc-create-error">{{ importError }}</div>
+
+          <!-- Import Results -->
+          <div v-if="importResults.length > 0" class="kc-import-results">
+            <div class="kc-import-summary">
+              共 {{ importTotalFiles }} 个文件：
+              <span class="kc-import-stat success">✅ 导入 {{ importedCount }}</span>
+              <span class="kc-import-stat warning">⏭ 跳过 {{ skippedCount }}</span>
+              <span v-if="errorsCount > 0" class="kc-import-stat error">❌ 失败 {{ errorsCount }}</span>
+            </div>
+            <div class="kc-import-result-list">
+              <div
+                v-for="(result, idx) in importResults"
+                :key="idx"
+                class="kc-import-result-item"
+                :class="result.status"
+              >
+                <span class="kc-import-result-icon">
+                  {{ result.status === 'imported' ? '✅' : result.status === 'overwritten' ? '🔄' : result.status === 'skipped' ? '⏭' : '❌' }}
+                </span>
+                <span class="kc-import-result-name">{{ result.filename }}</span>
+                <span v-if="result.id" class="kc-import-result-id">{{ result.id }}</span>
+                <span v-if="result.message" class="kc-import-result-msg">{{ result.message }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="kc-create-actions">
+            <button class="fluent-btn" @click="closeImportModal">关闭</button>
+            <button class="fluent-btn" :disabled="importSubmitting || !importFolderPath.trim()" @click="submitImport">
+              {{ importSubmitting ? '导入中...' : '开始导入' }}
+            </button>
+          </div>
         </div>
       </div>
     </Teleport>
@@ -228,6 +307,23 @@ const newCardMarkdown = ref('')
 const createSubmitting = ref(false)
 const createCardError = ref('')
 const createAllowOverwrite = ref(false)
+
+// Delete state
+const deleting = ref(false)
+const deleteConfirmVisible = ref(false)
+const deleteTargetCard = ref<KnowledgeCard | null>(null)
+
+// Import folder state
+const importModalVisible = ref(false)
+const importFolderPath = ref('')
+const importAllowOverwrite = ref(false)
+const importSubmitting = ref(false)
+const importError = ref('')
+const importResults = ref<{ filename: string; id: string; status: string; message?: string }[]>([])
+const importTotalFiles = ref(0)
+const importedCount = ref(0)
+const skippedCount = ref(0)
+const errorsCount = ref(0)
 
 // Domain colors
 const DOMAIN_COLORS: Record<string, string> = {
@@ -447,6 +543,103 @@ function closeModal() {
   selectedCard.value = null
 }
 
+// Delete card
+function confirmDeleteCard() {
+  if (!selectedCard.value) return
+  deleteTargetCard.value = selectedCard.value
+  deleteConfirmVisible.value = true
+}
+
+function cancelDelete() {
+  deleteConfirmVisible.value = false
+  deleteTargetCard.value = null
+}
+
+async function executeDelete() {
+  const card = deleteTargetCard.value
+  if (!card) return
+
+  deleting.value = true
+  try {
+    await $fetch(`/api/knowledge/${card.id}`, { method: 'DELETE' })
+    deleteConfirmVisible.value = false
+    deleteTargetCard.value = null
+    selectedCard.value = null
+    await refreshCards()
+  } catch (e: any) {
+    console.error('Failed to delete card:', e)
+    alert(e?.data?.statusMessage || e?.message || '删除失败')
+  } finally {
+    deleting.value = false
+  }
+}
+
+// Import folder
+function openImportModal() {
+  importModalVisible.value = true
+  importError.value = ''
+  importResults.value = []
+  importTotalFiles.value = 0
+  importedCount.value = 0
+  skippedCount.value = 0
+  errorsCount.value = 0
+}
+
+function closeImportModal() {
+  importModalVisible.value = false
+  importError.value = ''
+}
+
+async function submitImport() {
+  const folderPath = importFolderPath.value.trim()
+  if (!folderPath) {
+    importError.value = '请输入文件夹路径'
+    return
+  }
+
+  importSubmitting.value = true
+  importError.value = ''
+  importResults.value = []
+
+  try {
+    const data = await $fetch<{
+      ok: boolean
+      imported: number
+      skipped: number
+      errors: number
+      totalFiles: number
+      cardsCount: number
+      results: { filename: string; id: string; status: string; message?: string }[]
+      message?: string
+    }>('/api/knowledge/import-folder', {
+      method: 'POST',
+      body: {
+        folderPath,
+        overwrite: importAllowOverwrite.value,
+      },
+    })
+
+    importResults.value = data.results || []
+    importTotalFiles.value = data.totalFiles || 0
+    importedCount.value = data.imported || 0
+    skippedCount.value = data.skipped || 0
+    errorsCount.value = data.errors || 0
+
+    if (data.message) {
+      importError.value = data.message
+    }
+
+    // 如果有导入成功的，刷新列表
+    if ((data.imported || 0) > 0) {
+      await refreshCards()
+    }
+  } catch (e: any) {
+    importError.value = e?.data?.statusMessage || e?.message || '导入失败'
+  } finally {
+    importSubmitting.value = false
+  }
+}
+
 // Simple Markdown -> HTML
 function markdownToHtml(md: string): string {
   if (!md) return ''
@@ -495,6 +688,14 @@ function markdownToHtml(md: string): string {
 // Keyboard
 function onKeyDown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+  if (deleteConfirmVisible.value) {
+    cancelDelete()
+    return
+  }
+  if (importModalVisible.value) {
+    closeImportModal()
+    return
+  }
   if (createModalVisible.value) {
     closeCreateModal()
     return
@@ -969,5 +1170,118 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 12px;
   color: var(--accent-default);
+}
+
+/* Delete button in detail modal */
+.kc-delete-btn {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+/* Confirm modal */
+.kc-confirm-modal {
+  max-width: 460px;
+}
+.kc-confirm-text {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+.kc-confirm-text strong {
+  color: var(--text-primary);
+}
+
+/* Import folder */
+.kc-import-field {
+  margin-bottom: 12px;
+}
+.kc-import-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.kc-import-results {
+  margin-top: 16px;
+  border: 1px solid var(--control-stroke);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.02);
+  padding: 12px;
+}
+
+.kc-import-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.kc-import-stat {
+  font-weight: 600;
+  font-size: 12px;
+}
+.kc-import-stat.success { color: #2ecc71; }
+.kc-import-stat.warning { color: #f39c12; }
+.kc-import-stat.error { color: #e74c3c; }
+
+.kc-import-result-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kc-import-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: rgba(255,255,255,0.03);
+}
+.kc-import-result-item.imported,
+.kc-import-result-item.overwritten {
+  background: rgba(46, 204, 113, 0.08);
+}
+.kc-import-result-item.skipped {
+  background: rgba(243, 156, 18, 0.08);
+}
+.kc-import-result-item.error {
+  background: rgba(231, 76, 60, 0.08);
+}
+
+.kc-import-result-icon {
+  flex-shrink: 0;
+}
+.kc-import-result-name {
+  color: var(--text-primary);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.kc-import-result-id {
+  color: var(--accent-default);
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+}
+.kc-import-result-msg {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

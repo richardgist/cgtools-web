@@ -1,10 +1,12 @@
 import { defineWebSocketHandler } from 'h3'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import * as fs from 'fs'
+import * as path from 'path'
 import {
   buildAndroidSoJobPlan,
   type AndroidSoJobType,
   type AndroidSoPayload,
+  type BuildSoPayload,
   type CommandStep,
 } from '../../utils/androidSoCommands'
 
@@ -101,6 +103,52 @@ const finishRun = (peer: Peer, runState: ActiveRun, exitCode: number, outputs?: 
   send(peer, { type: 'end', exitCode, outputs })
 }
 
+type BkDistToggleState = {
+  switchPath: string
+  backupPath: string
+}
+
+const tryDisableBkDist = (peer: Peer, payload: BuildSoPayload): BkDistToggleState | null => {
+  const engineRoot = (payload.engineRoot || '').trim()
+  if (!engineRoot) {
+    send(peer, { type: 'stderr', data: '[warning] Missing engineRoot, skip bk_dist bypass.\n' })
+    return null
+  }
+
+  const switchPath = path.join(engineRoot, 'Build', 'BatchFiles', 'bk_dist_tools', 'bk_dist_enable_ubt.json')
+  if (!fs.existsSync(switchPath)) {
+    send(peer, { type: 'stdout', data: `[info] bk_dist switch file not found, skip bypass: ${switchPath}\n` })
+    return null
+  }
+
+  const backupPath = `${switchPath}.cgtools_backup_${Date.now()}`
+  try {
+    fs.renameSync(switchPath, backupPath)
+    send(peer, { type: 'stdout', data: `[info] bk_dist bypass enabled for this run: ${switchPath}\n` })
+    return { switchPath, backupPath }
+  } catch (error: any) {
+    send(peer, { type: 'stderr', data: `[warning] Failed to disable bk_dist: ${error?.message || error}\n` })
+    return null
+  }
+}
+
+const tryRestoreBkDist = (peer: Peer, state: BkDistToggleState | null) => {
+  if (!state) {
+    return
+  }
+  try {
+    if (fs.existsSync(state.backupPath) && !fs.existsSync(state.switchPath)) {
+      fs.renameSync(state.backupPath, state.switchPath)
+      send(peer, { type: 'stdout', data: `[info] bk_dist switch restored: ${state.switchPath}\n` })
+    } else if (fs.existsSync(state.backupPath)) {
+      fs.unlinkSync(state.backupPath)
+      send(peer, { type: 'stderr', data: '[warning] bk_dist switch already exists, removed backup file.\n' })
+    }
+  } catch (error: any) {
+    send(peer, { type: 'stderr', data: `[warning] Failed to restore bk_dist switch: ${error?.message || error}\n` })
+  }
+}
+
 export default defineWebSocketHandler({
   open(peer) {
     const typedPeer = peer as unknown as Peer
@@ -158,79 +206,88 @@ export default defineWebSocketHandler({
         send(typedPeer, { type: 'stderr', data: `[warning] ${warning}\n` })
       }
 
-      let exitCode = 0
-      for (const step of plan.steps) {
-        if (runState.terminating) {
-          exitCode = -1
-          break
+      let bkDistToggleState: BkDistToggleState | null = null
+      try {
+        if (jobType === 'buildSo') {
+          bkDistToggleState = tryDisableBkDist(typedPeer, payload as BuildSoPayload)
         }
 
-        send(typedPeer, { type: 'step', name: step.name })
-        const result = await runStep(typedPeer, runState, step)
+        let exitCode = 0
+        for (const step of plan.steps) {
+          if (runState.terminating) {
+            exitCode = -1
+            break
+          }
 
-        if (runState.terminating) {
-          exitCode = -1
-          break
+          send(typedPeer, { type: 'step', name: step.name })
+          const result = await runStep(typedPeer, runState, step)
+
+          if (runState.terminating) {
+            exitCode = -1
+            break
+          }
+
+          if (result.code !== 0) {
+            exitCode = result.code
+            break
+          }
         }
 
-        if (result.code !== 0) {
-          exitCode = result.code
-          break
+        if (exitCode === 0 && jobType === 'buildSo') {
+          const soPath = plan.outputs.soPath
+          if (!soPath || !fs.existsSync(soPath)) {
+            send(typedPeer, {
+              type: 'error',
+              data: `Build succeeded but expected SO not found: ${soPath}`,
+            })
+            finishRun(typedPeer, runState, 1)
+            return
+          }
         }
+
+        if (exitCode === 0 && jobType === 'replaceA') {
+          const outputApk = plan.outputs.outputApk
+          if (!outputApk || !fs.existsSync(outputApk)) {
+            send(typedPeer, {
+              type: 'error',
+              data: `replaceSo finished but output APK not found: ${outputApk}`,
+            })
+            finishRun(typedPeer, runState, 1)
+            return
+          }
+        }
+
+        if (exitCode === 0 && jobType === 'injectB') {
+          const localLogPath = plan.outputs.localLogPath
+          const marker = plan.outputs.expectedMarker
+          if (!localLogPath || !fs.existsSync(localLogPath)) {
+            send(typedPeer, {
+              type: 'error',
+              data: `Injection log pull failed: ${localLogPath}`,
+            })
+            finishRun(typedPeer, runState, 1)
+            return
+          }
+
+          const logText = fs.readFileSync(localLogPath, 'utf-8')
+          if (!marker || !logText.includes(marker)) {
+            send(typedPeer, {
+              type: 'error',
+              data: `Injection marker not found in log: ${marker}`,
+            })
+            send(typedPeer, {
+              type: 'stderr',
+              data: `[inject-log] ${localLogPath}\n${logText}\n`,
+            })
+            finishRun(typedPeer, runState, 1, plan.outputs)
+            return
+          }
+        }
+
+        finishRun(typedPeer, runState, exitCode, plan.outputs)
+      } finally {
+        tryRestoreBkDist(typedPeer, bkDistToggleState)
       }
-
-      if (exitCode === 0 && jobType === 'buildSo') {
-        const soPath = plan.outputs.soPath
-        if (!soPath || !fs.existsSync(soPath)) {
-          send(typedPeer, {
-            type: 'error',
-            data: `Build succeeded but expected SO not found: ${soPath}`,
-          })
-          finishRun(typedPeer, runState, 1)
-          return
-        }
-      }
-
-      if (exitCode === 0 && jobType === 'replaceA') {
-        const outputApk = plan.outputs.outputApk
-        if (!outputApk || !fs.existsSync(outputApk)) {
-          send(typedPeer, {
-            type: 'error',
-            data: `replaceSo finished but output APK not found: ${outputApk}`,
-          })
-          finishRun(typedPeer, runState, 1)
-          return
-        }
-      }
-
-      if (exitCode === 0 && jobType === 'injectB') {
-        const localLogPath = plan.outputs.localLogPath
-        const marker = plan.outputs.expectedMarker
-        if (!localLogPath || !fs.existsSync(localLogPath)) {
-          send(typedPeer, {
-            type: 'error',
-            data: `Injection log pull failed: ${localLogPath}`,
-          })
-          finishRun(typedPeer, runState, 1)
-          return
-        }
-
-        const logText = fs.readFileSync(localLogPath, 'utf-8')
-        if (!marker || !logText.includes(marker)) {
-          send(typedPeer, {
-            type: 'error',
-            data: `Injection marker not found in log: ${marker}`,
-          })
-          send(typedPeer, {
-            type: 'stderr',
-            data: `[inject-log] ${localLogPath}\n${logText}\n`,
-          })
-          finishRun(typedPeer, runState, 1, plan.outputs)
-          return
-        }
-      }
-
-      finishRun(typedPeer, runState, exitCode, plan.outputs)
     } catch (error: any) {
       runState.process = null
       runState.running = false

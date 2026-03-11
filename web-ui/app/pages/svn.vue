@@ -52,9 +52,6 @@
 
             <div class="checkbox-group">
               <label class="fluent-checkbox">
-                <input type="checkbox" v-model="fromRepoRoot"> <span>从仓库根目录</span>
-              </label>
-              <label class="fluent-checkbox">
                 <input type="checkbox" v-model="useParent"> <span>包含上级目录</span>
               </label>
             </div>
@@ -212,7 +209,6 @@ import { ref, computed, nextTick } from 'vue'
 const pathA = ref('')
 const pathB = ref('')
 const revision = ref('')
-const fromRepoRoot = ref(false)
 const useParent = ref(false)
 
 const patchContent = ref('')
@@ -278,7 +274,6 @@ onMounted(() => {
       const parsed = JSON.parse(savedSettings)
       pathA.value = parsed.pathA || ''
       pathB.value = parsed.pathB || ''
-      fromRepoRoot.value = parsed.fromRepoRoot || false
       useParent.value = parsed.useParent || false
     } catch(e) {}
   }
@@ -286,11 +281,10 @@ onMounted(() => {
 })
 
 // Save settings when changed
-watch([pathA, pathB, fromRepoRoot, useParent], () => {
+watch([pathA, pathB, useParent], () => {
   localStorage.setItem('cgtools_svn_settings', JSON.stringify({
     pathA: pathA.value,
     pathB: pathB.value,
-    fromRepoRoot: fromRepoRoot.value,
     useParent: useParent.value
   }))
 })
@@ -431,7 +425,6 @@ async function generatePatch() {
       body: {
         revision: revision.value,
         url: pathA.value,
-        fromRepoRoot: fromRepoRoot.value,
         parentLevels: useParent.value ? 1 : 0
       }
     })

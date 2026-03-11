@@ -53,6 +53,10 @@ export default defineEventHandler(async (event) => {
         return { success: false, message: 'Missing patchContent or targetDir' }
     }
 
+    // Sanitize paths for Windows: remove trailing backslash to prevent quote escaping issues
+    const sanitizedTargetDir = targetDir.replace(/\\$/, '')
+    const sanitizedSourcePath = sourcePath ? sourcePath.replace(/\\$/, '') : ''
+
     const tempDir = os.tmpdir()
     const patchFileName = `svn_patch_${Date.now()}_r${revision || 'unk'}.patch`
     const patchFilePath = path.join(tempDir, patchFileName)
@@ -61,11 +65,11 @@ export default defineEventHandler(async (event) => {
         // svn diff -c 对本地工作副本产生的 patch 中路径是相对于 sourcePath 的绝对/相对路径
         // 需要把 sourcePath（路径 A）替换为 targetDir（路径 B）使路径能对上
         let processedContent = patchContent
-        if (sourcePath) {
-            const normalizedSource = sourcePath.replace(/\\/g, '/').replace(/\/$/, '')
-            const normalizedTarget = targetDir.replace(/\\/g, '/').replace(/\/$/, '')
-            const sourceBackSlash = sourcePath.replace(/\//g, '\\').replace(/\\$/, '')
-            const targetBackSlash = targetDir.replace(/\//g, '\\').replace(/\\$/, '')
+        if (sanitizedSourcePath) {
+            const normalizedSource = sanitizedSourcePath.replace(/\\/g, '/').replace(/\/$/, '')
+            const normalizedTarget = sanitizedTargetDir.replace(/\\/g, '/').replace(/\/$/, '')
+            const sourceBackSlash = sanitizedSourcePath.replace(/\//g, '\\').replace(/\\$/, '')
+            const targetBackSlash = sanitizedTargetDir.replace(/\//g, '\\').replace(/\\$/, '')
 
             processedContent = processedContent
                 .replaceAll(normalizedSource, normalizedTarget)
@@ -73,7 +77,7 @@ export default defineEventHandler(async (event) => {
         }
         fs.writeFileSync(patchFilePath, processedContent, 'utf-8')
 
-        const cmd = `chcp 65001 >nul && svn patch "${patchFilePath}" "${targetDir}"`
+        const cmd = `chcp 65001 >nul && svn patch "${patchFilePath}" "${sanitizedTargetDir}"`
         const { stdout, stderr } = await execAsync(cmd, {
             encoding: 'utf-8',
             maxBuffer: 10 * 1024 * 1024

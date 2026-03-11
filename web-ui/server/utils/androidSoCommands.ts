@@ -5,7 +5,7 @@ import { spawnSync } from 'child_process'
 
 export type AndroidArch = 'arm64-v8a' | 'armeabi-v7a' | 'x86_64'
 export type BuildConfig = 'Development' | 'Test' | 'Shipping'
-export type AndroidSoJobType = 'buildSo' | 'replaceA' | 'injectB'
+export type AndroidSoJobType = 'buildSo' | 'replaceA' | 'injectB' | 'pushSo'
 
 export interface BuildSoPayload {
   projectRoot: string
@@ -13,8 +13,8 @@ export interface BuildSoPayload {
   engineRoot: string
   config: BuildConfig
   arch: AndroidArch
-  cookFlavor: string
-  archiveDir?: string
+  logPath?: string
+  maxParallelActions?: number
 }
 
 export interface ReplaceAPayload {
@@ -32,7 +32,14 @@ export interface InjectBPayload {
   launchActivity: string
 }
 
-export type AndroidSoPayload = BuildSoPayload | ReplaceAPayload | InjectBPayload
+export interface PushSoPayload {
+  soPath: string
+  remotePath: string
+  packageName?: string
+  useRunAs?: boolean
+}
+
+export type AndroidSoPayload = BuildSoPayload | ReplaceAPayload | InjectBPayload | PushSoPayload
 
 export interface CommandStep {
   name: string
@@ -88,45 +95,64 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   const errors: string[] = []
   const warnings: string[] = []
   const projectDir = path.dirname(payload.projectFile || '')
-  const runUatBat = path.join(payload.engineRoot || '', 'Build', 'BatchFiles', 'RunUAT.bat')
-  const archiveDir = payload.archiveDir || path.join(payload.projectRoot || '', 'bin')
+  const targetName = path.basename(payload.projectFile || '', path.extname(payload.projectFile || ''))
+  const ubtExe = path.join(payload.engineRoot || '', 'Binaries', 'DotNET', 'UnrealBuildTool.exe')
+  const defaultLogPath = path.join(projectDir, 'Saved', 'Logs', 'Build', `AndroidSO_${payload.config}_${payload.arch}.log`)
+  const resolvedLogPath = (payload.logPath || '').trim()
+    ? (path.isAbsolute((payload.logPath || '').trim()) ? (payload.logPath || '').trim() : path.join(payload.projectRoot || '', (payload.logPath || '').trim()))
+    : defaultLogPath
   const outputSoPath = path.join(projectDir, 'Intermediate', 'Android', 'APK', 'jni', payload.arch || 'arm64-v8a', 'libUE4.so')
+  const archArgMap: Record<AndroidArch, string> = {
+    'arm64-v8a': '-arm64',
+    'armeabi-v7a': '-armv7',
+    x86_64: '-x64',
+  }
+  const archArg = archArgMap[payload.arch]
+  const maxParallelActions = Number(payload.maxParallelActions)
+  const hasMaxParallelActions = Number.isInteger(maxParallelActions) && maxParallelActions > 0
 
   addValidation(errors, process.platform === 'win32', 'Only Windows is supported for this flow.')
   addValidation(errors, fs.existsSync(payload.projectRoot || ''), `projectRoot not found: ${payload.projectRoot}`)
   addValidation(errors, fs.existsSync(payload.projectFile || ''), `projectFile not found: ${payload.projectFile}`)
   addValidation(errors, fs.existsSync(payload.engineRoot || ''), `engineRoot not found: ${payload.engineRoot}`)
-  addValidation(errors, fs.existsSync(runUatBat), `RunUAT.bat not found: ${runUatBat}`)
+  addValidation(errors, fs.existsSync(ubtExe), `UnrealBuildTool.exe not found: ${ubtExe}`)
   addValidation(errors, VALID_ARCHES.has(payload.arch), `Unsupported arch: ${payload.arch}`)
   addValidation(errors, VALID_CONFIGS.has(payload.config), `Unsupported config: ${payload.config}`)
-  addValidation(errors, !!payload.cookFlavor, 'cookFlavor is required.')
-
-  if (!fs.existsSync(archiveDir)) {
-    warnings.push(`archiveDir does not exist yet and will be created by UAT if needed: ${archiveDir}`)
-  }
+  addValidation(errors, !!targetName, `Unable to resolve target name from projectFile: ${payload.projectFile}`)
+  addValidation(
+    errors,
+    !payload.maxParallelActions || (hasMaxParallelActions && maxParallelActions <= 128),
+    `maxParallelActions must be an integer between 1 and 128, got: ${payload.maxParallelActions}`,
+  )
 
   const args = [
-    `-ScriptsForProject=${payload.projectFile}`,
-    'BuildCookRun',
-    `-project=${payload.projectFile}`,
-    '-targetplatform=Android',
-    `-clientconfig=${payload.config}`,
-    `-cookflavor=${payload.cookFlavor}`,
-    '-skipcook',
-    '-stage',
-    '-archive',
-    `-archivedirectory=${archiveDir}`,
-    '-package',
-    '-build',
-    '-pak',
-    '-nocompileeditor',
-    '-NoDebugInfo',
-    '-utf8output',
-  ]
+    targetName,
+    'Android',
+    payload.config,
+    `-Project=${payload.projectFile}`,
+    payload.projectFile,
+    '-NoUBTMakefiles',
+    `-remoteini=${projectDir}`,
+    '-skipdeploy',
+    '-BuildPipeline=',
+    archArg,
+    ...(payload.config === 'Shipping' ? ['-ShippingDev'] : []),
+    '-forceframepointer',
+    '-noxge',
+    '-generatemanifest',
+    ...(hasMaxParallelActions ? [`-MaxParallelActions=${maxParallelActions}`] : []),
+    `-log=${resolvedLogPath}`,
+    '-NoHotReload',
+  ].filter(Boolean) as string[]
+
+  if (payload.config !== 'Shipping') {
+    warnings.push('ShippingDev is only added when config=Shipping.')
+  }
+  warnings.push(`UBT log will be written to: ${resolvedLogPath}`)
 
   const step: CommandStep = {
-    name: 'Build Android SO with UAT',
-    cmd: runUatBat,
+    name: 'Build Android SO with UBT',
+    cmd: ubtExe,
     args,
     cwd: payload.projectRoot,
   }
@@ -138,6 +164,7 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     warnings,
     outputs: {
       soPath: outputSoPath,
+      buildLogPath: resolvedLogPath,
     },
   }
 }
@@ -271,6 +298,80 @@ const buildInjectPlan = (payload: InjectBPayload): JobPlan => {
   }
 }
 
+const normalizePushDestination = (remotePath: string) => {
+  const sanitized = (remotePath || '').trim().replace(/\\/g, '/')
+  if (!sanitized) {
+    return '/data/local/tmp/libUE4.so'
+  }
+  if (sanitized.endsWith('/')) {
+    return `${sanitized}libUE4.so`
+  }
+  if (sanitized.toLowerCase().endsWith('.so')) {
+    const parentDir = path.posix.dirname(sanitized)
+    return `${parentDir}/libUE4.so`
+  }
+  return `${sanitized}/libUE4.so`
+}
+
+const buildPushSoPlan = (payload: PushSoPayload): JobPlan => {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  addValidation(errors, process.platform === 'win32', 'Only Windows is supported for this flow.')
+  addValidation(errors, fs.existsSync(payload.soPath || ''), `SO not found: ${payload.soPath}`)
+  addValidation(errors, payload.soPath.toLowerCase().endsWith('.so'), 'soPath must end with .so')
+  addValidation(errors, !!(payload.remotePath || '').trim(), 'remotePath is required.')
+  addValidation(errors, isAdbAvailable(), 'adb is not available in PATH.')
+  if (payload.useRunAs) {
+    addValidation(errors, !!(payload.packageName || '').trim(), 'packageName is required when useRunAs=true.')
+  }
+
+  const remotePath = normalizePushDestination(payload.remotePath || '')
+  if (payload.useRunAs) {
+    const packageName = (payload.packageName || '').trim()
+    const parentDir = path.posix.dirname(remotePath)
+    const copyCmd = `run-as ${packageName} sh -c 'mkdir -p ${parentDir} && cp /data/local/tmp/libUE4.so ${remotePath} && ls -l ${remotePath}'`
+    const steps: CommandStep[] = [
+      {
+        name: 'Push SO to /data/local/tmp',
+        cmd: 'adb',
+        args: ['push', payload.soPath, '/data/local/tmp/libUE4.so'],
+      },
+      {
+        name: 'Copy SO into app sandbox target path',
+        cmd: 'adb',
+        args: ['shell', copyCmd],
+      },
+    ]
+    warnings.push(`Run-as mode enabled, target package: ${packageName}`)
+    return {
+      steps,
+      preview: steps.map((step) => renderCommand(step.cmd, step.args, step.cwd)).join('\n'),
+      validationErrors: errors,
+      warnings,
+      outputs: {
+        remoteSoPath: remotePath,
+      },
+    }
+  }
+
+  const step: CommandStep = {
+    name: 'Push SO via adb',
+    cmd: 'adb',
+    args: ['push', payload.soPath, remotePath],
+  }
+
+  return {
+    steps: [step],
+    preview: renderCommand(step.cmd, step.args, step.cwd),
+    validationErrors: errors,
+    warnings,
+    outputs: {
+      remoteSoPath: remotePath,
+    },
+  }
+}
+
 export const buildAndroidSoJobPlan = (jobType: AndroidSoJobType, payload: AndroidSoPayload): JobPlan => {
   if (jobType === 'buildSo') {
     return buildBuildSoPlan(payload as BuildSoPayload)
@@ -281,6 +382,9 @@ export const buildAndroidSoJobPlan = (jobType: AndroidSoJobType, payload: Androi
   if (jobType === 'injectB') {
     return buildInjectPlan(payload as InjectBPayload)
   }
+  if (jobType === 'pushSo') {
+    return buildPushSoPlan(payload as PushSoPayload)
+  }
   return {
     steps: [],
     preview: '',
@@ -289,4 +393,3 @@ export const buildAndroidSoJobPlan = (jobType: AndroidSoJobType, payload: Androi
     outputs: {},
   }
 }
-

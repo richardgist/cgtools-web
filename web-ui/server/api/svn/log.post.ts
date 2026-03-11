@@ -23,13 +23,19 @@ export default defineEventHandler(async (event) => {
         return { success: false, error: 'Missing revision or url' }
     }
 
+    const revStr = String(revision)
+    const urlStr = String(url)
+
+    // Sanitize URL for Windows
+    const sanitizedUrl = urlStr.replace(/\\$/, '')
+
     try {
-        const { stdout, stderr } = await execAsync(`chcp 65001 >nul && svn log -r ${revision} "${url}" --non-interactive`, { encoding: 'utf-8' })
+        const { stdout, stderr } = await execAsync(`chcp 65001 >nul && svn log -r ${revStr} "${sanitizedUrl}" --non-interactive`, { encoding: 'utf-8' })
         if (stderr && !stdout) {
             return { success: false, error: stderr.trim() }
         }
         return { success: true, log: stdout }
-    } catch (error) {
+    } catch (error: any) {
         return { success: false, error: error.message || error.stderr || 'SVN log failed' }
     }
 })

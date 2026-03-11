@@ -64,12 +64,16 @@ export default defineEventHandler(async (event) => {
         return { success: false, message: '缺少参数: revision, sourcePath, targetDir' }
     }
 
+    // Sanitize paths for Windows
+    const sanitizedSourcePath = sourcePath.replace(/\\$/, '')
+    const sanitizedTargetDir = targetDir.replace(/\\$/, '')
+
     try {
         // Step 1: Get SVN URL from sourcePath
-        const sourceUrl = await getSvnUrl(sourcePath)
+        const sourceUrl = await getSvnUrl(sanitizedSourcePath)
 
         // Step 2: Execute svn merge
-        const cmd = `chcp 65001 >nul && svn merge -c ${revision} "${sourceUrl}" "${targetDir}" --non-interactive --accept postpone`
+        const cmd = `chcp 65001 >nul && svn merge -c ${revision} "${sourceUrl}" "${sanitizedTargetDir}" --non-interactive --accept postpone`
 
         const { stdout, stderr } = await execAsync(cmd, {
             encoding: 'utf-8',
@@ -127,9 +131,18 @@ export default defineEventHandler(async (event) => {
             }
         }
 
+        let message = stderr?.trim() || stdout?.trim() || errMsg || 'svn merge 执行失败'
+
+        // Detect common errors and provide helpful Chinese messages
+        if (message.includes('updating') || message.includes('out of date')) {
+            message = `目标工作副本版本落后，请先在路径 B 执行 svn update 再重试。\n原始错误: ${message}`
+        } else if (message.includes('E175013') || message.includes('Permission denied')) {
+            message = `SVN 权限被拒绝，请检查账号是否有对应路径的访问权限。\n原始错误: ${message}`
+        }
+
         return {
             success: false,
-            message: stderr?.trim() || stdout?.trim() || errMsg || 'svn merge 执行失败'
+            message
         }
     }
 })

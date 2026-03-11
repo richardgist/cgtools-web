@@ -17,7 +17,8 @@
             <button class="tab-btn" :class="{ active: activeTab === 'buildSo' }" @click="activeTab = 'buildSo'">1) Build SO</button>
             <button class="tab-btn" :class="{ active: activeTab === 'replaceA' }" @click="activeTab = 'replaceA'">2) Plan A Replace APK SO</button>
             <button class="tab-btn" :class="{ active: activeTab === 'injectB' }" @click="activeTab = 'injectB'">3) Plan B Inject Runtime SO</button>
-            <button class="tab-btn" :class="{ active: activeTab === 'guideC' }" @click="activeTab = 'guideC'">4) Plan C APL Guide</button>
+            <button class="tab-btn" :class="{ active: activeTab === 'pushSo' }" @click="activeTab = 'pushSo'">4) Push SO</button>
+            <button class="tab-btn" :class="{ active: activeTab === 'guideC' }" @click="activeTab = 'guideC'">5) Plan C APL Guide</button>
           </div>
         </div>
       </section>
@@ -81,15 +82,16 @@
                 <option value="x86_64">x86_64</option>
               </select>
             </div>
-            <div class="field-row compact">
-              <label>Cook Flavor</label>
-              <input v-model="settings.cookFlavor" class="fluent-input" placeholder="ETC2" />
-            </div>
             <div class="field-row">
-              <label>Archive Dir (optional)</label>
-              <input v-model="settings.archiveDir" class="fluent-input path-input" placeholder="C:\\CJGame\\PRE418\\bin" />
-              <button class="fluent-btn sub" @click="pickFolder('archiveDir')">Browse</button>
+              <label>Build Log Path (optional)</label>
+              <input v-model="settings.logPath" class="fluent-input path-input" placeholder="C:\\CJGame\\PRE418\\Survive\\Saved\\Logs\\Build\\AndroidSO_Test_arm64-v8a.log" />
             </div>
+            <div class="field-row compact">
+              <label>Max Parallel Actions (optional)</label>
+              <input v-model.number="settings.maxParallelActions" class="fluent-input" type="number" min="1" max="128" placeholder="8" />
+            </div>
+            <div class="hint-line">Build uses UnrealBuildTool direct mode (not UAT BuildCookRun).</div>
+            <div class="hint-line">Shipping config will auto append <code>-ShippingDev</code>.</div>
             <div class="hint-line">Expected output: <code>{{ expectedSoOutputPath }}</code></div>
           </div>
 
@@ -137,6 +139,27 @@
               Inject success marker must exist in pulled log:
               <code>inject dlclose_addr res : 0</code>
             </div>
+          </div>
+
+          <div v-else-if="activeTab === 'pushSo'" class="field-grid">
+            <div class="field-row">
+              <label>SO Path</label>
+              <input v-model="settings.soPath" class="fluent-input path-input" />
+              <button class="fluent-btn sub" @click="pickFile('soPath', 'so')">Browse</button>
+            </div>
+            <div class="field-row">
+              <label>Remote Path (dir or .so file)</label>
+              <input v-model="settings.pushRemotePath" class="fluent-input path-input" placeholder="/data/local/tmp/" />
+            </div>
+            <label class="check-line">
+              <input v-model="settings.pushUseRunAs" type="checkbox" />
+              Use run-as (copy from /data/local/tmp into app sandbox path)
+            </label>
+            <div class="field-row" v-if="settings.pushUseRunAs">
+              <label>Package Name</label>
+              <input v-model="settings.pushPackageName" class="fluent-input path-input" placeholder="com.tencent.tmgp.pubgmhd" />
+            </div>
+            <div class="hint-line">SO will always be renamed to <code>libUE4.so</code> at target path.</div>
           </div>
 
           <div v-else class="field-grid">
@@ -229,10 +252,13 @@ const settings = reactive({
   androidInjectDir: 'C:\\CJGame\\PRE418\\Survive\\ExternalTools\\AndroidInject',
   config: 'Development',
   arch: 'arm64-v8a',
-  cookFlavor: 'ETC2',
-  archiveDir: '',
+  logPath: '',
+  maxParallelActions: null,
   apkPath: '',
   soPath: '',
+  pushRemotePath: '/data/local/tmp/',
+  pushUseRunAs: false,
+  pushPackageName: 'com.tencent.tmgp.pubgmhd',
   showInstallHint: true,
   packageName: 'com.tencent.tmgp.pubgmhd',
   launchActivity: 'com.epicgames.ue4.SplashActivity',
@@ -247,6 +273,13 @@ const quote = (text) => {
   return /[\s"&|<>^]/.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text
 }
 
+const archToUbtArg = (arch) => {
+  if (arch === 'arm64-v8a') return '-arm64'
+  if (arch === 'armeabi-v7a') return '-armv7'
+  if (arch === 'x86_64') return '-x64'
+  return ''
+}
+
 const expectedSoOutputPath = computed(() => {
   if (!settings.projectFile) return ''
   const projectDir = settings.projectFile.replace(/[\\/][^\\/]+$/, '')
@@ -259,9 +292,16 @@ const aplSnippet = computed(() => {
 
 const commandPreview = computed(() => {
   if (activeTab.value === 'buildSo') {
-    const runUat = `${settings.engineRoot}\\Build\\BatchFiles\\RunUAT.bat`
-    const archiveArg = settings.archiveDir ? ` -archivedirectory=${quote(settings.archiveDir)}` : ''
-    return `${quote(runUat)} -ScriptsForProject=${quote(settings.projectFile)} BuildCookRun -project=${quote(settings.projectFile)} -targetplatform=Android -clientconfig=${settings.config} -cookflavor=${settings.cookFlavor} -skipcook -stage -archive${archiveArg} -package -build -pak -nocompileeditor -NoDebugInfo -utf8output`
+    const ubtExe = `${settings.engineRoot}\\Binaries\\DotNET\\UnrealBuildTool.exe`
+    const targetName = settings.projectFile ? settings.projectFile.replace(/^.*[\\/]/, '').replace(/\.uproject$/i, '') : 'ShadowTrackerExtra'
+    const projectDir = settings.projectFile ? settings.projectFile.replace(/[\\/][^\\/]+$/, '') : settings.projectRoot
+    const shippingDevArg = settings.config === 'Shipping' ? ' -ShippingDev' : ''
+    const archArg = archToUbtArg(settings.arch)
+    const defaultLogPath = `${projectDir}\\Saved\\Logs\\Build\\AndroidSO_${settings.config}_${settings.arch}.log`
+    const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultLogPath
+    const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
+
+    return `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(settings.projectFile)} ${quote(settings.projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
   }
   if (activeTab.value === 'replaceA') {
     return `${quote(settings.ueAppToolsExe)} -mode=replaceSo -platform=android -apkPath=${quote(settings.apkPath)} -soPath=${quote(settings.soPath)} -arch=${settings.arch}`
@@ -277,6 +317,22 @@ const commandPreview = computed(() => {
       `adb shell "run-as ${settings.packageName} sh -c './inject_demo ${settings.packageName} > /data/local/tmp/log_android_inject.txt'"`,
       'adb pull /data/local/tmp/log_android_inject.txt <local_path>',
     ].join('\n')
+  }
+  if (activeTab.value === 'pushSo') {
+    const remotePath = settings.pushRemotePath?.trim() || '/data/local/tmp/'
+    const normalized = remotePath.replace(/\\/g, '/')
+    const remoteFile = normalized.endsWith('/')
+      ? `${normalized}libUE4.so`
+      : (normalized.toLowerCase().endsWith('.so') ? `${normalized.replace(/\/[^/]*$/, '')}/libUE4.so` : `${normalized}/libUE4.so`)
+    if (settings.pushUseRunAs) {
+      const packageName = settings.pushPackageName?.trim() || 'com.tencent.tmgp.pubgmhd'
+      const remoteDir = remoteFile.replace(/\/[^/]*$/, '')
+      return [
+        `adb push ${quote(settings.soPath)} /data/local/tmp/libUE4.so`,
+        `adb shell "run-as ${packageName} sh -c 'mkdir -p ${remoteDir} && cp /data/local/tmp/libUE4.so ${remoteFile} && ls -l ${remoteFile}'"`,
+      ].join('\n')
+    }
+    return `adb push ${quote(settings.soPath)} ${quote(remoteFile)}`
   }
   return aplSnippet.value
 })
@@ -436,8 +492,8 @@ const buildPayload = () => {
       engineRoot: settings.engineRoot,
       config: settings.config,
       arch: settings.arch,
-      cookFlavor: settings.cookFlavor,
-      archiveDir: settings.archiveDir || undefined,
+      logPath: settings.logPath?.trim() || undefined,
+      maxParallelActions: Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? settings.maxParallelActions : undefined,
     }
   }
   if (activeTab.value === 'replaceA') {
@@ -447,6 +503,14 @@ const buildPayload = () => {
       arch: settings.arch,
       ueAppToolsExe: settings.ueAppToolsExe,
       showInstallHint: settings.showInstallHint,
+    }
+  }
+  if (activeTab.value === 'pushSo') {
+    return {
+      soPath: settings.soPath,
+      remotePath: settings.pushRemotePath?.trim() || '/data/local/tmp/',
+      useRunAs: settings.pushUseRunAs,
+      packageName: settings.pushUseRunAs ? (settings.pushPackageName?.trim() || undefined) : undefined,
     }
   }
   return {

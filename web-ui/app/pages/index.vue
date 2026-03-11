@@ -90,6 +90,26 @@
           </svg>
         </div>
       </NuxtLink>
+
+      <NuxtLink to="/knowledge" class="dashboard-card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </div>
+        <div class="card-content">
+          <div class="card-title">知识卡片</div>
+          <div class="card-desc">浏览、搜索和管理从对话中提取的结构化知识卡片</div>
+        </div>
+        <div class="card-action">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </div>
+      </NuxtLink>
     </div>
   </div>
 </template>

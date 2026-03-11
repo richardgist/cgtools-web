@@ -90,6 +90,21 @@
           <span class="nav-label">Android SO</span>
           <div class="nav-indicator"></div>
         </NuxtLink>
+
+        <div class="nav-separator"></div>
+        <div class="nav-group-title">知识库</div>
+
+        <NuxtLink to="/knowledge" class="nav-item" exact-active-class="active" title="知识卡片">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </span>
+          <span class="nav-label">知识卡片</span>
+          <div class="nav-indicator"></div>
+        </NuxtLink>
       </div>
 
       <div class="nav-footer">

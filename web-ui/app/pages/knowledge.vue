@@ -266,6 +266,19 @@
             </div>
           </div>
 
+          <p v-if="!hasDirectoryPickerAPI" class="kc-create-hint" style="color: #f0ad4e; font-size: 0.85em; margin-top: 8px;">
+            ⚠️ 当前浏览器不支持目录读写 API，将使用兼容模式：可正常导入云端，但无法自动重命名本地文件。
+          </p>
+          <!-- Hidden fallback input for browsers without showDirectoryPicker -->
+          <input
+            ref="folderInputRef"
+            type="file"
+            webkitdirectory
+            directory
+            multiple
+            style="display: none;"
+            @change="handleFolderInputChange"
+          />
           <div class="kc-create-actions">
             <button class="fluent-btn" @click="closeImportModal">关闭</button>
             <button class="fluent-btn primary" :disabled="importSubmitting" @click="handleDirectoryImport">
@@ -338,6 +351,8 @@ const importTotalFiles = ref(0)
 const importedCount = ref(0)
 const skippedCount = ref(0)
 const errorsCount = ref(0)
+const folderInputRef = ref<HTMLInputElement | null>(null)
+const hasDirectoryPickerAPI = ref(typeof window !== 'undefined' && 'showDirectoryPicker' in window)
 
 // Domain colors
 const DOMAIN_COLORS: Record<string, string> = {
@@ -673,8 +688,9 @@ function closeImportModal() {
 }
 
 async function handleDirectoryImport() {
+  // 如果不支持 showDirectoryPicker，使用 input fallback
   if (!(window as any).showDirectoryPicker) {
-    importError.value = '您的浏览器不支持本地目录读写 API，请使用 Chrome 或 Edge 浏览器。'
+    folderInputRef.value?.click()
     return
   }
 
@@ -789,48 +805,7 @@ async function handleDirectoryImport() {
       }
     }
     
-    if (filePayloads.length > 0) {
-      const data = await $fetch<{
-        ok: boolean
-        imported: number
-        skipped: number
-        errors: number
-        totalFiles: number
-        cardsCount: number
-        results: { filename: string; id: string; status: string; message?: string }[]
-        message?: string
-      }>('/api/knowledge/import-files', {
-        method: 'POST',
-        body: {
-          files: filePayloads,
-          overwrite: importAllowOverwrite.value,
-        },
-      })
-      
-      // 合并前端本地记录与服务端反馈 (去重以便不显示两次相同的提示，但简单起见直接拼接)
-      const finalResults = [...resultsPreview]
-      for (const r of data.results || []) {
-        // 如果前面本地已经有报告了，就不必重复报告成功，只报告服务端的错误即可
-        if (r.status !== 'imported' && r.status !== 'overwritten') {
-           finalResults.push(r as any)
-        } else if (!resultsPreview.find(p => p.id === r.id)) {
-           finalResults.push(r as any)
-        }
-      }
-
-      importResults.value = finalResults
-      importTotalFiles.value = data.totalFiles || 0
-      importedCount.value = data.imported || 0
-      skippedCount.value = data.skipped || 0
-      errorsCount.value = data.errors || 0
-      if (data.message) importError.value = data.message
-      
-      if ((data.imported || 0) > 0) {
-        await refreshCards()
-      }
-    } else {
-      importError.value = '没有找到需要导入的 .md 文件'
-    }
+    await uploadFilePayloads(filePayloads, resultsPreview)
   } catch (e: any) {
     if (e.name === 'AbortError') {
       importError.value = '文件操作已被取消'
@@ -839,6 +814,150 @@ async function handleDirectoryImport() {
     }
   } finally {
     importSubmitting.value = false
+  }
+}
+
+// Fallback: 处理 <input webkitdirectory> 选择的文件
+async function handleFolderInputChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = input.files
+  if (!files || files.length === 0) return
+
+  importSubmitting.value = true
+  importError.value = ''
+  importResults.value = []
+
+  try {
+    // 获取当天的前缀
+    const dDate = new Date()
+    const yyyy = dDate.getFullYear()
+    const MM = String(dDate.getMonth() + 1).padStart(2, '0')
+    const dd = String(dDate.getDate()).padStart(2, '0')
+    const prefix = `KC-${yyyy}-${MM}-${dd}-`
+
+    // 获取云端卡片列表
+    const indexData = await $fetch<{ version: number, cards: any[] }>('/api/knowledge')
+    const existingIds = new Set(indexData.cards?.map(c => c.id) || [])
+
+    let maxSeq = 0
+    for (const id of existingIds) {
+      if (id.startsWith(prefix)) {
+        const parts = id.split('-')
+        const seq = parseInt(parts[parts.length - 1], 10)
+        if (!isNaN(seq) && seq > maxSeq) {
+          maxSeq = seq
+        }
+      }
+    }
+
+    const filePayloads: { filename: string, content: string }[] = []
+    const resultsPreview: { status: string, filename: string, message: string, id: string }[] = []
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (!file.name.toLowerCase().endsWith('.md')) continue
+
+      const content = await file.text()
+      const normalized = content.replace(/^\ufeff/, '')
+      const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
+
+      let existingFileId = ''
+      if (match) {
+        const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+        if (idMatch) {
+          existingFileId = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+        }
+      }
+
+      const baseNameId = file.name.replace(/\.md$/i, '')
+      const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
+
+      const effectiveId = existingFileId && CARD_ID_PATTERN.test(existingFileId) ? existingFileId
+          : (CARD_ID_PATTERN.test(baseNameId) ? baseNameId : '')
+
+      let chosenId = effectiveId
+
+      if (!chosenId || (existingIds.has(chosenId) && !importAllowOverwrite.value)) {
+        maxSeq++
+        chosenId = `${prefix}${String(maxSeq).padStart(3, '0')}`
+        existingIds.add(chosenId)
+      }
+
+      // 在 fallback 模式下无法写回本地文件，仅构建上传内容
+      let newContent = content
+      if (!match) {
+        newContent = `---\nid: ${chosenId}\ntitle: ${baseNameId}\n---\n\n${normalized}`
+      } else {
+        const fmContent = match[1]
+        const body = match[2]
+        let newFm = fmContent
+        if (/^id\s*:/m.test(fmContent)) {
+          newFm = fmContent.replace(/^id\s*:.*$/m, `id: ${chosenId}`)
+        } else {
+          newFm = `id: ${chosenId}\n${fmContent}`
+        }
+        newContent = `---\n${newFm}\n---\n${body}`
+      }
+
+      resultsPreview.push({ status: 'imported', id: chosenId, filename: file.name, message: `已分配 ID ${chosenId}（兼容模式，本地文件未修改）` })
+      filePayloads.push({ filename: `${chosenId}.md`, content: newContent })
+    }
+
+    await uploadFilePayloads(filePayloads, resultsPreview)
+  } catch (e: any) {
+    importError.value = '操作出错: ' + (e.message || String(e))
+  } finally {
+    importSubmitting.value = false
+    // 重置 input 以便下次可以再选同一文件夹
+    input.value = ''
+  }
+}
+
+// 公共：上传文件到云端
+async function uploadFilePayloads(
+  filePayloads: { filename: string, content: string }[],
+  resultsPreview: { status: string, filename: string, message: string, id: string }[]
+) {
+  if (filePayloads.length > 0) {
+    const data = await $fetch<{
+      ok: boolean
+      imported: number
+      skipped: number
+      errors: number
+      totalFiles: number
+      cardsCount: number
+      results: { filename: string; id: string; status: string; message?: string }[]
+      message?: string
+    }>('/api/knowledge/import-files', {
+      method: 'POST',
+      body: {
+        files: filePayloads,
+        overwrite: importAllowOverwrite.value,
+      },
+    })
+
+    // 合并前端本地记录与服务端反馈
+    const finalResults = [...resultsPreview]
+    for (const r of data.results || []) {
+      if (r.status !== 'imported' && r.status !== 'overwritten') {
+        finalResults.push(r as any)
+      } else if (!resultsPreview.find(p => p.id === r.id)) {
+        finalResults.push(r as any)
+      }
+    }
+
+    importResults.value = finalResults
+    importTotalFiles.value = data.totalFiles || 0
+    importedCount.value = data.imported || 0
+    skippedCount.value = data.skipped || 0
+    errorsCount.value = data.errors || 0
+    if (data.message) importError.value = data.message
+
+    if ((data.imported || 0) > 0) {
+      await refreshCards()
+    }
+  } else {
+    importError.value = '没有找到需要导入的 .md 文件'
   }
 }
 

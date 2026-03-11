@@ -45,8 +45,11 @@
 
         <!-- Domain Filter -->
         <div class="kc-filter-section">
-          <div class="kc-filter-title">领域</div>
-          <div class="kc-domain-tags">
+          <div class="kc-filter-title kc-collapsible-title" @click="domainCollapsed = !domainCollapsed">
+            <span>领域</span>
+            <svg class="kc-collapse-icon" :class="{ rotated: !domainCollapsed }" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+          </div>
+          <div v-show="!domainCollapsed" class="kc-domain-tags">
             <span
               v-for="(count, domain) in domainCounts"
               :key="domain"
@@ -307,6 +310,7 @@ interface KnowledgeCard {
 const cards = ref<KnowledgeCard[]>([])
 const loading = ref(false)
 const rebuildingIndex = ref(false)
+const domainCollapsed = ref(true)
 const searchText = ref('')
 const activeDomains = ref(new Set<string>())
 const activeDifficulties = ref(new Set<number>())
@@ -850,6 +854,27 @@ onMounted(() => {
   color: var(--text-tertiary);
   margin-bottom: 8px;
   font-weight: 600;
+}
+
+.kc-collapsible-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
+  margin-bottom: 4px;
+}
+.kc-collapsible-title:hover {
+  color: var(--text-secondary);
+}
+
+.kc-collapse-icon {
+  transition: transform 0.2s;
+  color: var(--text-tertiary);
+}
+.kc-collapse-icon.rotated {
+  transform: rotate(180deg);
 }
 
 .kc-search {

@@ -1,54 +1,55 @@
-// POST /api/knowledge/import-folder - 从文件夹导入 Markdown 卡片
-import { existsSync, readdirSync, readFileSync } from 'fs'
-import { resolve, basename, extname } from 'path'
+// POST /api/knowledge/import-files - 从浏览器上传的一批 Markdown 文件内容导入卡片
+import { basename } from 'path'
 import { CARD_ID_PATTERN, parseFrontmatter, batchImportCards, buildKnowledgeIndex } from '../../utils/knowledgeCards'
 
-interface ImportFolderBody {
-    folderPath?: string
+interface ImportFileItem {
+    filename: string
+    content: string
+}
+
+interface ImportFilesBody {
+    files?: ImportFileItem[]
     overwrite?: boolean
 }
 
 export default defineEventHandler(async (event) => {
-    const body = await readBody<ImportFolderBody>(event)
-    const folderPath = typeof body?.folderPath === 'string' ? body.folderPath.trim() : ''
+    const body = await readBody<ImportFilesBody>(event)
+    const files = Array.isArray(body?.files) ? body.files : []
     const overwrite = Boolean(body?.overwrite)
 
-    if (!folderPath) {
-        throw createError({ statusCode: 400, statusMessage: '请提供文件夹路径' })
-    }
-
-    if (!existsSync(folderPath)) {
-        throw createError({ statusCode: 400, statusMessage: `文件夹不存在: ${folderPath}` })
+    if (files.length === 0) {
+        return {
+            ok: true,
+            imported: 0,
+            skipped: 0,
+            errors: 0,
+            totalFiles: 0,
+            cardsCount: buildKnowledgeIndex().cards.length,
+            results: [],
+            message: '没有收到任何文件',
+        }
     }
 
     try {
-        const files = readdirSync(folderPath).filter(f => extname(f).toLowerCase() === '.md')
-
-        if (files.length === 0) {
-            return {
-                ok: true,
-                imported: 0,
-                skipped: 0,
-                errors: 0,
-                totalFiles: 0,
-                cardsCount: buildKnowledgeIndex().cards.length,
-                results: [],
-                message: '该文件夹中没有找到 .md 文件',
-            }
-        }
-
-        // 读取每个文件，解析 id
         const items: { id: string; markdown: string; filename: string }[] = []
         const skippedFiles: { filename: string; message: string }[] = []
 
-        for (const filename of files) {
-            const sourcePath = resolve(folderPath, filename)
+        for (const file of files) {
+            const filename = file.filename
+            const content = file.content
+
+            if (!filename.toLowerCase().endsWith('.md')) {
+                skippedFiles.push({ filename, message: '不是 .md 文件' })
+                continue
+            }
+
             try {
-                const content = readFileSync(sourcePath, 'utf-8')
                 const { meta } = parseFrontmatter(content)
 
                 const idFromMeta = typeof meta.id === 'string' ? meta.id.trim() : ''
                 const fileBaseName = basename(filename, '.md')
+
+                // 先看 frontmatter 中是否有 id，没有的话取文件名
                 const effectiveId = idFromMeta && CARD_ID_PATTERN.test(idFromMeta)
                     ? idFromMeta
                     : CARD_ID_PATTERN.test(fileBaseName) ? fileBaseName : ''
@@ -63,7 +64,7 @@ export default defineEventHandler(async (event) => {
 
                 items.push({ id: effectiveId, markdown: content, filename })
             } catch (e: any) {
-                skippedFiles.push({ filename, message: e?.message || '读取文件失败' })
+                skippedFiles.push({ filename, message: e?.message || '读取文件内容失败' })
             }
         }
 

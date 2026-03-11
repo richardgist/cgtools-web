@@ -228,18 +228,24 @@
       <div v-if="importModalVisible" class="kc-modal-overlay" @click.self="closeImportModal">
         <div class="kc-modal kc-create-modal">
           <button class="kc-modal-close" @click="closeImportModal">×</button>
-          <h2 class="kc-modal-title">📁 从文件夹导入</h2>
+          <h2 class="kc-modal-title">📁 从本地文件夹导入</h2>
           <p class="kc-create-hint">
-            指定本地文件夹路径，系统将扫描其中的 .md 文件并自动导入为知识卡片。文件需包含 frontmatter 中的 id 字段，或文件名符合 KC-YYYY-MM-DD-NNN 格式。
+            请选择本地包含知识卡片的文件夹，系统将在浏览器读取 .md 文件内容并上传到云端。文件需包含 frontmatter 中的 id 字段，或文件名符合 KC-YYYY-MM-DD-NNN 格式。
           </p>
           <div class="kc-import-field">
-            <label class="kc-import-label">文件夹路径</label>
+            <label class="kc-import-label">选择本地文件夹</label>
             <input
-              v-model="importFolderPath"
+              type="file"
+              webkitdirectory
+              directory
+              multiple
               class="fluent-input"
               style="width: 100%;"
-              placeholder="例如：C:\\Users\\xxx\\Documents\\cards"
+              @change="handleImportFileSelect"
             />
+            <div v-if="selectedImportFiles.length > 0" style="margin-top: 8px; font-size: 11px; color: var(--text-tertiary);">
+              已选择 {{ selectedImportFiles.length }} 个 .md 文件准备导入
+            </div>
           </div>
           <label class="kc-create-overwrite">
             <input v-model="importAllowOverwrite" type="checkbox" />
@@ -274,8 +280,8 @@
 
           <div class="kc-create-actions">
             <button class="fluent-btn" @click="closeImportModal">关闭</button>
-            <button class="fluent-btn" :disabled="importSubmitting || !importFolderPath.trim()" @click="submitImport">
-              {{ importSubmitting ? '导入中...' : '开始导入' }}
+            <button class="fluent-btn" :disabled="importSubmitting || selectedImportFiles.length === 0" @click="submitImport">
+              {{ importSubmitting ? '导入中...' : '开始上传并导入' }}
             </button>
           </div>
         </div>
@@ -335,7 +341,7 @@ const deleteTargetCard = ref<KnowledgeCard | null>(null)
 
 // Import folder state
 const importModalVisible = ref(false)
-const importFolderPath = ref('')
+const selectedImportFiles = ref<File[]>([])
 const importAllowOverwrite = ref(false)
 const importSubmitting = ref(false)
 const importError = ref('')
@@ -666,6 +672,7 @@ async function executeDelete() {
 function openImportModal() {
   importModalVisible.value = true
   importError.value = ''
+  selectedImportFiles.value = []
   importResults.value = []
   importTotalFiles.value = 0
   importedCount.value = 0
@@ -676,12 +683,21 @@ function openImportModal() {
 function closeImportModal() {
   importModalVisible.value = false
   importError.value = ''
+  selectedImportFiles.value = []
+}
+
+function handleImportFileSelect(e: Event) {
+  const target = e.target as HTMLInputElement
+  if (!target || !target.files) return
+
+  // Filter only .md files
+  const filesArray = Array.from(target.files)
+  selectedImportFiles.value = filesArray.filter(f => f.name.toLowerCase().endsWith('.md'))
 }
 
 async function submitImport() {
-  const folderPath = importFolderPath.value.trim()
-  if (!folderPath) {
-    importError.value = '请输入文件夹路径'
+  if (selectedImportFiles.value.length === 0) {
+    importError.value = '请先选择包含 .md 文件的文件夹'
     return
   }
 
@@ -690,6 +706,14 @@ async function submitImport() {
   importResults.value = []
 
   try {
+    // Read all selected file contents
+    const filePayloads = await Promise.all(
+      selectedImportFiles.value.map(async (file) => {
+        const content = await file.text()
+        return { filename: file.name, content }
+      })
+    )
+
     const data = await $fetch<{
       ok: boolean
       imported: number
@@ -699,10 +723,10 @@ async function submitImport() {
       cardsCount: number
       results: { filename: string; id: string; status: string; message?: string }[]
       message?: string
-    }>('/api/knowledge/import-folder', {
+    }>('/api/knowledge/import-files', {
       method: 'POST',
       body: {
-        folderPath,
+        files: filePayloads,
         overwrite: importAllowOverwrite.value,
       },
     })

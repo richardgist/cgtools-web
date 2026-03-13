@@ -182,6 +182,71 @@ export function getCardMarkdownBody(id: string): string | null {
   return row.content
 }
 
+export function updateKnowledgeCardBody(id: string, markdownBody: string): KnowledgeCardRecord | null {
+  const normalizedBody = markdownBody.replace(/^\ufeff/, '').trim()
+  if (!normalizedBody) {
+    throw createKnowledgeError(400, 'Card markdown body is empty')
+  }
+
+  const db = getDb()
+  const existing = db.prepare('SELECT * FROM knowledge_cards WHERE id = ?').get(id) as any
+  if (!existing) {
+    return null
+  }
+
+  const summary = extractSummary(normalizedBody).replace(/\r?\n+/g, ' ').trim()
+  const now = formatTimestamp(new Date())
+  const rawContent = String(existing.content || '').replace(/^\ufeff/, '')
+  const frontmatterMatch = rawContent.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/)
+
+  let contentToSave = ''
+  if (frontmatterMatch?.[1]) {
+    let frontmatter = frontmatterMatch[1]
+
+    if (/^id\s*:/m.test(frontmatter)) {
+      frontmatter = frontmatter.replace(/^id\s*:.*$/m, `id: ${id}`)
+    } else {
+      frontmatter = `id: ${id}\n${frontmatter}`
+    }
+
+    if (/^summary\s*:/m.test(frontmatter)) {
+      frontmatter = frontmatter.replace(/^summary\s*:.*$/m, `summary: ${summary}`)
+    } else {
+      frontmatter = `${frontmatter}\nsummary: ${summary}`
+    }
+
+    contentToSave = `---\n${frontmatter}\n---\n\n${normalizedBody}\n`
+  } else {
+    let parsedTags: any[] = []
+    try {
+      const candidate = JSON.parse(existing.tags || '[]')
+      parsedTags = Array.isArray(candidate) ? candidate : []
+    } catch {
+      parsedTags = []
+    }
+    const tags = parsedTags
+    const escapedTags = tags.map((tag: any) => `'${String(tag).replace(/'/g, "\\'")}'`).join(', ')
+    const sourceLine = existing.source ? `\nsource: ${String(existing.source)}` : ''
+
+    contentToSave =
+      `---\n` +
+      `id: ${id}\n` +
+      `title: ${existing.title || id}\n` +
+      `domain: ${existing.domain || '未分类'}\n` +
+      `difficulty: ${Number(existing.difficulty) || 1}\n` +
+      `date: ${existing.date || ''}\n` +
+      `tags: [${escapedTags}]\n` +
+      `summary: ${summary}${sourceLine}\n` +
+      `---\n\n` +
+      `${normalizedBody}\n`
+  }
+
+  db.prepare('UPDATE knowledge_cards SET summary=?, content=?, updated_at=? WHERE id=?')
+    .run(summary, contentToSave, now, id)
+
+  return getKnowledgeCard(id)
+}
+
 /** 创建或更新一张卡片（从完整 Markdown 内容） */
 export function createKnowledgeCardFromMarkdown(markdown: string, overwrite = false) {
   const normalized = markdown.replace(/^\ufeff/, '').trim()

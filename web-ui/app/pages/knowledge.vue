@@ -195,17 +195,39 @@
           <h2 class="kc-modal-title">{{ selectedCard.title }}</h2>
           <div class="kc-modal-meta">
             <span class="kc-card-domain" :style="{ background: getDomainColor(selectedCard.domain) }">{{ selectedCard.domain }}</span>
-            <span class="kc-card-diff">{{ '⭐'.repeat(selectedCard.difficulty || 1) }}</span>
+            <span class="kc-card-diff">{{ String.fromCodePoint(0x2B50).repeat(selectedCard.difficulty || 1) }}</span>
             <span class="kc-card-date">{{ selectedCard.date }}</span>
-            <span v-if="selectedCard.source" class="kc-modal-source">📎 {{ selectedCard.source }}</span>
+            <span v-if="selectedCard.source" class="kc-modal-source">Source: {{ selectedCard.source }}</span>
+            <button
+              v-if="!editingCard"
+              class="fluent-btn kc-edit-btn"
+              style="margin-left: auto;"
+              @click="startEditCard"
+            >
+              Edit
+            </button>
+            <template v-else>
+              <button class="fluent-btn kc-edit-btn" style="margin-left: auto;" @click="cancelEditCard" :disabled="savingCardEdit">Cancel</button>
+              <button class="fluent-btn primary kc-edit-btn" @click="saveCardEdit" :disabled="savingCardEdit">
+                {{ savingCardEdit ? 'Saving...' : 'Save' }}
+              </button>
+            </template>
             <button class="fluent-btn danger kc-delete-btn" @click="confirmDeleteCard" :disabled="deleting">
-              {{ deleting ? '删除中...' : '🗑️ 删除' }}
+              {{ deleting ? 'Deleting...' : 'Delete' }}
             </button>
           </div>
           <div class="kc-card-tags" style="margin-bottom:16px;">
             <span v-for="tag in (selectedCard.tags || [])" :key="tag" class="kc-card-tag">{{ tag }}</span>
           </div>
-          <div v-if="cardContentLoading" class="kc-modal-loading">加载内容中...</div>
+          <div v-if="cardContentLoading" class="kc-modal-loading">Loading content...</div>
+          <div v-else-if="editingCard">
+            <textarea
+              v-model="editingCardMarkdown"
+              class="kc-edit-textarea"
+              placeholder="Please edit card markdown body..."
+            />
+            <div v-if="editCardError" class="kc-create-error">{{ editCardError }}</div>
+          </div>
           <div v-else class="kc-modal-body" v-html="cardContentHtml"></div>
         </div>
       </div>
@@ -354,6 +376,20 @@
           />
           <div class="kc-create-actions">
             <button class="fluent-btn" @click="closeImportModal">关闭</button>
+            <button
+              class="fluent-btn"
+              :disabled="importSubmitting"
+              @click="quickSyncMissingCards('all-missing')"
+            >
+              {{ importSubmitting ? '刷新中...' : '只刷未入库（全部）' }}
+            </button>
+            <button
+              class="fluent-btn"
+              :disabled="importSubmitting"
+              @click="quickSyncMissingCards('today-missing')"
+            >
+              {{ importSubmitting ? '刷新中...' : '只刷今天未入库' }}
+            </button>
             <button class="fluent-btn primary" :disabled="importSubmitting" @click="handleDirectoryImport">
               {{ importSubmitting ? '整理并上传中...' : '📂 选择本地文件夹并开始' }}
             </button>
@@ -377,6 +413,11 @@ interface KnowledgeCard {
   summary: string
   source?: string
 }
+
+type QuickSyncMode = 'all-missing' | 'today-missing'
+type FolderActionMode = 'full-import' | QuickSyncMode
+
+const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
 
 const cards = ref<KnowledgeCard[]>([])
 const loading = ref(false)
@@ -403,6 +444,11 @@ const activeTags = ref(new Set<string>())
 const selectedCard = ref<KnowledgeCard | null>(null)
 const cardContentHtml = ref('')
 const cardContentLoading = ref(false)
+const cardRawMarkdown = ref('')
+const editingCard = ref(false)
+const editingCardMarkdown = ref('')
+const savingCardEdit = ref(false)
+const editCardError = ref('')
 const createModalVisible = ref(false)
 const newCardMarkdown = ref('')
 const createSubmitting = ref(false)
@@ -450,6 +496,7 @@ const skippedCount = ref(0)
 const errorsCount = ref(0)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const hasDirectoryPickerAPI = ref(typeof window !== 'undefined' && 'showDirectoryPicker' in window)
+const pendingFolderAction = ref<FolderActionMode>('full-import')
 
 // Domain colors
 const DOMAIN_COLORS: Record<string, string> = {
@@ -721,12 +768,18 @@ async function submitCreateCard() {
 async function openCard(card: KnowledgeCard) {
   selectedCard.value = card
   cardContentHtml.value = ''
+  cardRawMarkdown.value = ''
+  editingCard.value = false
+  editingCardMarkdown.value = ''
+  editCardError.value = ''
   cardContentLoading.value = true
 
   try {
     const data = await $fetch<{ markdown: string }>(`/api/knowledge/${card.id}`)
+    cardRawMarkdown.value = data.markdown || ''
     cardContentHtml.value = markdownToHtml(data.markdown)
   } catch {
+    cardRawMarkdown.value = ''
     cardContentHtml.value = '<p>加载内容失败</p>'
   } finally {
     cardContentLoading.value = false
@@ -735,6 +788,61 @@ async function openCard(card: KnowledgeCard) {
 
 function closeModal() {
   selectedCard.value = null
+  editingCard.value = false
+  editingCardMarkdown.value = ''
+  editCardError.value = ''
+  savingCardEdit.value = false
+}
+
+function startEditCard() {
+  if (!selectedCard.value) return
+  editingCard.value = true
+  editCardError.value = ''
+  editingCardMarkdown.value = cardRawMarkdown.value || ''
+}
+
+function cancelEditCard() {
+  editingCard.value = false
+  editCardError.value = ''
+  editingCardMarkdown.value = cardRawMarkdown.value || ''
+}
+
+async function saveCardEdit() {
+  const card = selectedCard.value
+  if (!card) return
+
+  const markdown = editingCardMarkdown.value.trim()
+  if (!markdown) {
+    editCardError.value = '卡片内容不能为空'
+    return
+  }
+
+  savingCardEdit.value = true
+  editCardError.value = ''
+
+  try {
+    const data = await $fetch<{ markdown: string }>(`/api/knowledge/${card.id}`, {
+      method: 'PUT',
+      body: {
+        markdown,
+      },
+    })
+
+    cardRawMarkdown.value = data.markdown || markdown
+    editingCardMarkdown.value = cardRawMarkdown.value
+    cardContentHtml.value = markdownToHtml(cardRawMarkdown.value)
+    editingCard.value = false
+
+    await refreshCards()
+    const latest = cards.value.find(item => item.id === card.id)
+    if (latest) {
+      selectedCard.value = latest
+    }
+  } catch (e: any) {
+    editCardError.value = e?.data?.statusMessage || e?.message || '保存失败'
+  } finally {
+    savingCardEdit.value = false
+  }
 }
 
 // Delete card
@@ -863,10 +971,162 @@ async function executeDeduplicateDelete() {
   }
 }
 
+function getTodayPrefix() {
+  const d = new Date()
+  const yyyy = d.getFullYear()
+  const MM = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `KC-${yyyy}-${MM}-${dd}-`
+}
+
+function extractCardIdFromMarkdown(filename: string, content: string) {
+  const normalized = content.replace(/^\ufeff/, '')
+  const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
+
+  let idFromMeta = ''
+  if (match) {
+    const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+    if (idMatch) {
+      idFromMeta = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+    }
+  }
+
+  const idFromFileName = filename.replace(/\.md$/i, '')
+  if (idFromMeta && CARD_ID_PATTERN.test(idFromMeta)) return idFromMeta
+  if (CARD_ID_PATTERN.test(idFromFileName)) return idFromFileName
+  return ''
+}
+
+function isTodayCardId(id: string) {
+  const normalized = id.replace(/_/g, '-')
+  return normalized.startsWith(getTodayPrefix())
+}
+
+function updateImportSummary(results: { status: string }[], totalFiles: number) {
+  importTotalFiles.value = totalFiles
+  importedCount.value = results.filter(r => r.status === 'imported' || r.status === 'overwritten').length
+  skippedCount.value = results.filter(r => r.status === 'skipped').length
+  errorsCount.value = results.filter(r => r.status === 'error').length
+}
+
+async function collectMdFilesFromDirectoryHandle(dirHandle: any) {
+  const files: { filename: string; content: string }[] = []
+  for await (const entry of dirHandle.values()) {
+    if (entry.kind !== 'file' || !entry.name.toLowerCase().endsWith('.md')) continue
+    const file = await entry.getFile()
+    files.push({ filename: entry.name, content: await file.text() })
+  }
+  return files
+}
+
+async function collectMdFilesFromFileList(files: FileList) {
+  const items: { filename: string; content: string }[] = []
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    if (!file.name.toLowerCase().endsWith('.md')) continue
+    items.push({ filename: file.name, content: await file.text() })
+  }
+  return items
+}
+
+async function quickSyncMissingCards(mode: QuickSyncMode) {
+  if (!(window as any).showDirectoryPicker) {
+    pendingFolderAction.value = mode
+    folderInputRef.value?.click()
+    return
+  }
+
+  importSubmitting.value = true
+  importError.value = ''
+  importResults.value = []
+
+  try {
+    const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' })
+    const localFiles = await collectMdFilesFromDirectoryHandle(dirHandle)
+    await syncMissingCardsFromLocalFiles(localFiles, mode)
+  } catch (e: any) {
+    if (e.name === 'AbortError') {
+      importError.value = '文件操作已取消'
+    } else {
+      importError.value = '操作出错: ' + (e.message || String(e))
+    }
+  } finally {
+    importSubmitting.value = false
+  }
+}
+
+async function syncMissingCardsFromLocalFiles(
+  localFiles: { filename: string; content: string }[],
+  mode: QuickSyncMode
+) {
+  const indexData = await $fetch<{ version: number, cards: any[] }>('/api/knowledge')
+  const existingIds = new Set(indexData.cards?.map(card => String(card.id || '')) || [])
+  const queuedIds = new Set<string>()
+
+  const filePayloads: { filename: string, content: string }[] = []
+  const resultsPreview: { status: string, filename: string, message: string, id: string }[] = []
+
+  for (const localFile of localFiles) {
+    const id = extractCardIdFromMarkdown(localFile.filename, localFile.content)
+    if (!id) {
+      resultsPreview.push({
+        status: 'skipped',
+        id: '',
+        filename: localFile.filename,
+        message: '缺少合法卡片 ID（需 frontmatter.id 或文件名符合 KC-YYYY-MM-DD-NNN）',
+      })
+      continue
+    }
+
+    if (mode === 'today-missing' && !isTodayCardId(id)) {
+      resultsPreview.push({
+        status: 'skipped',
+        id,
+        filename: localFile.filename,
+        message: '不是今天的卡片，已跳过',
+      })
+      continue
+    }
+
+    if (existingIds.has(id)) {
+      resultsPreview.push({
+        status: 'skipped',
+        id,
+        filename: localFile.filename,
+        message: '卡片已在数据库中，已跳过',
+      })
+      continue
+    }
+
+    if (queuedIds.has(id)) {
+      resultsPreview.push({
+        status: 'skipped',
+        id,
+        filename: localFile.filename,
+        message: '本地目录中有重复 ID，已跳过',
+      })
+      continue
+    }
+
+    queuedIds.add(id)
+    filePayloads.push({
+      filename: `${id}.md`,
+      content: localFile.content,
+    })
+  }
+
+  await uploadFilePayloads(filePayloads, resultsPreview, {
+    overwrite: false,
+    totalFiles: localFiles.length,
+    emptyMessage: mode === 'today-missing' ? '今天没有需要补刷的卡片' : '本地没有需要补刷的卡片',
+  })
+}
+
 // Import folder
 function openImportModal() {
   importModalVisible.value = true
   importError.value = ''
+  pendingFolderAction.value = 'full-import'
   importResults.value = []
   importTotalFiles.value = 0
   importedCount.value = 0
@@ -877,11 +1137,13 @@ function openImportModal() {
 function closeImportModal() {
   importModalVisible.value = false
   importError.value = ''
+  pendingFolderAction.value = 'full-import'
 }
 
 async function handleDirectoryImport() {
   // 如果不支持 showDirectoryPicker，使用 input fallback
   if (!(window as any).showDirectoryPicker) {
+    pendingFolderAction.value = 'full-import'
     folderInputRef.value?.click()
     return
   }
@@ -1018,8 +1280,15 @@ async function handleFolderInputChange(event: Event) {
   importSubmitting.value = true
   importError.value = ''
   importResults.value = []
+  const actionMode = pendingFolderAction.value
 
   try {
+    if (actionMode !== 'full-import') {
+      const localFiles = await collectMdFilesFromFileList(files)
+      await syncMissingCardsFromLocalFiles(localFiles, actionMode)
+      return
+    }
+
     // 获取当天的前缀
     const dDate = new Date()
     const yyyy = dDate.getFullYear()
@@ -1101,6 +1370,7 @@ async function handleFolderInputChange(event: Event) {
   } finally {
     importSubmitting.value = false
     // 重置 input 以便下次可以再选同一文件夹
+    pendingFolderAction.value = 'full-import'
     input.value = ''
   }
 }
@@ -1108,7 +1378,12 @@ async function handleFolderInputChange(event: Event) {
 // 公共：上传文件到云端
 async function uploadFilePayloads(
   filePayloads: { filename: string, content: string }[],
-  resultsPreview: { status: string, filename: string, message: string, id: string }[]
+  resultsPreview: { status: string, filename: string, message: string, id: string }[],
+  options?: {
+    overwrite?: boolean
+    totalFiles?: number
+    emptyMessage?: string
+  }
 ) {
   if (filePayloads.length > 0) {
     const data = await $fetch<{
@@ -1124,7 +1399,7 @@ async function uploadFilePayloads(
       method: 'POST',
       body: {
         files: filePayloads,
-        overwrite: importAllowOverwrite.value,
+        overwrite: options?.overwrite ?? importAllowOverwrite.value,
       },
     })
 
@@ -1139,17 +1414,16 @@ async function uploadFilePayloads(
     }
 
     importResults.value = finalResults
-    importTotalFiles.value = data.totalFiles || 0
-    importedCount.value = data.imported || 0
-    skippedCount.value = data.skipped || 0
-    errorsCount.value = data.errors || 0
+    updateImportSummary(finalResults, options?.totalFiles ?? finalResults.length)
     if (data.message) importError.value = data.message
 
     if ((data.imported || 0) > 0) {
       await refreshCards()
     }
   } else {
-    importError.value = '没有找到需要导入的 .md 文件'
+    importResults.value = resultsPreview
+    updateImportSummary(resultsPreview, options?.totalFiles ?? resultsPreview.length)
+    importError.value = resultsPreview.length > 0 ? '' : (options?.emptyMessage ?? '没有找到需要导入的 .md 文件')
   }
 }
 
@@ -1213,7 +1487,13 @@ function onKeyDown(e: KeyboardEvent) {
     closeCreateModal()
     return
   }
-  if (selectedCard.value) closeModal()
+  if (selectedCard.value) {
+    if (editingCard.value) {
+      cancelEditCard()
+      return
+    }
+    closeModal()
+  }
 }
 
 onMounted(() => {
@@ -1740,10 +2020,29 @@ onMounted(() => {
 }
 
 /* Delete button in detail modal */
-.kc-delete-btn {
-  margin-left: auto;
+.kc-edit-btn {
   font-size: 12px;
   padding: 4px 12px;
+}
+
+.kc-delete-btn {
+  margin-left: 4px;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.kc-edit-textarea {
+  width: 100%;
+  min-height: 380px;
+  background: #121212;
+  border: 1px solid var(--control-stroke);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 12px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
 }
 
 /* Confirm modal */

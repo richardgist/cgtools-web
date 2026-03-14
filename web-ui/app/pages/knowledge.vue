@@ -326,10 +326,49 @@
       <div v-if="importModalVisible" class="kc-modal-overlay" @click.self="closeImportModal">
         <div class="kc-modal kc-create-modal">
           <button class="kc-modal-close" @click="closeImportModal">×</button>
-          <h2 class="kc-modal-title">📁 文件夹导入与序号整理</h2>
+          <h2 class="kc-modal-title">📁 文件导入与序号整理</h2>
           <p class="kc-create-hint">
-            此操作将读取您的本地文件夹，推算当天的最新卡片序号，<strong>自动处理并更新您本地的卡片文件名及文件内的 ID</strong>，最后同步上传到云端系统。
+            支持拖入 .md 文件、选择单个文件或选择整个文件夹导入。推算当天的最新卡片序号，<strong>自动处理卡片 ID</strong>，最后同步上传到云端系统。
           </p>
+
+          <!-- 拖拽区域 -->
+          <div
+            class="kc-drop-zone"
+            :class="{ 'kc-drop-zone-active': isDragOver, 'kc-drop-zone-disabled': importSubmitting }"
+            @dragover.prevent="onDragOver"
+            @dragleave.prevent="onDragLeave"
+            @drop.prevent="onDropFiles"
+          >
+            <div class="kc-drop-zone-content">
+              <span class="kc-drop-zone-icon">{{ isDragOver ? '📥' : '📄' }}</span>
+              <span class="kc-drop-zone-text">
+                {{ isDragOver ? '松开鼠标以导入文件' : '将 .md 文件拖到此处' }}
+              </span>
+              <span class="kc-drop-zone-hint">或点击下方按钮选择文件/文件夹</span>
+            </div>
+          </div>
+
+          <!-- 已拖入的待导入文件列表 -->
+          <div v-if="droppedFiles.length > 0 && importResults.length === 0" class="kc-dropped-files-preview">
+            <div class="kc-dropped-files-header">
+              <span>已选择 {{ droppedFiles.length }} 个 .md 文件</span>
+              <button class="fluent-btn fluent-btn-sm" @click="droppedFiles = []">清空</button>
+            </div>
+            <div class="kc-dropped-files-list">
+              <div v-for="(f, idx) in droppedFiles" :key="idx" class="kc-dropped-file-item">
+                📄 {{ f.filename }}
+              </div>
+            </div>
+            <button
+              class="fluent-btn primary"
+              style="margin-top: 8px; width: 100%;"
+              :disabled="importSubmitting"
+              @click="handleDroppedFilesImport"
+            >
+              {{ importSubmitting ? '导入中...' : `🚀 导入这 ${droppedFiles.length} 个文件` }}
+            </button>
+          </div>
+
           <label class="kc-create-overwrite">
             <input v-model="importAllowOverwrite" type="checkbox" />
             冲突时覆盖云端数据 (若不勾选，则为本地冲突文件分配全新的序号并重命名)
@@ -374,6 +413,15 @@
             style="display: none;"
             @change="handleFolderInputChange"
           />
+          <!-- Hidden input for selecting individual files -->
+          <input
+            ref="fileInputRef"
+            type="file"
+            multiple
+            accept=".md"
+            style="display: none;"
+            @change="handleFileInputChange"
+          />
           <div class="kc-create-actions">
             <button class="fluent-btn" @click="closeImportModal">关闭</button>
             <button
@@ -390,8 +438,11 @@
             >
               {{ importSubmitting ? '刷新中...' : '只刷今天未入库' }}
             </button>
+            <button class="fluent-btn" :disabled="importSubmitting" @click="fileInputRef?.click()">
+              {{ importSubmitting ? '处理中...' : '📄 选择文件' }}
+            </button>
             <button class="fluent-btn primary" :disabled="importSubmitting" @click="handleDirectoryImport">
-              {{ importSubmitting ? '整理并上传中...' : '📂 选择本地文件夹并开始' }}
+              {{ importSubmitting ? '整理并上传中...' : '📂 选择文件夹' }}
             </button>
           </div>
         </div>
@@ -495,8 +546,11 @@ const importedCount = ref(0)
 const skippedCount = ref(0)
 const errorsCount = ref(0)
 const folderInputRef = ref<HTMLInputElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 const hasDirectoryPickerAPI = ref(typeof window !== 'undefined' && 'showDirectoryPicker' in window)
 const pendingFolderAction = ref<FolderActionMode>('full-import')
+const isDragOver = ref(false)
+const droppedFiles = ref<{ filename: string; content: string }[]>([])
 
 // Domain colors
 const DOMAIN_COLORS: Record<string, string> = {
@@ -1138,6 +1192,8 @@ function closeImportModal() {
   importModalVisible.value = false
   importError.value = ''
   pendingFolderAction.value = 'full-import'
+  isDragOver.value = false
+  droppedFiles.value = []
 }
 
 async function handleDirectoryImport() {
@@ -1373,6 +1429,165 @@ async function handleFolderInputChange(event: Event) {
     pendingFolderAction.value = 'full-import'
     input.value = ''
   }
+}
+
+// 拖拽事件处理
+function onDragOver(e: DragEvent) {
+  if (importSubmitting.value) return
+  isDragOver.value = true
+}
+
+function onDragLeave(e: DragEvent) {
+  isDragOver.value = false
+}
+
+async function onDropFiles(e: DragEvent) {
+  isDragOver.value = false
+  if (importSubmitting.value) return
+  
+  const dt = e.dataTransfer
+  if (!dt || !dt.files || dt.files.length === 0) return
+
+  const mdFiles: { filename: string; content: string }[] = []
+  for (let i = 0; i < dt.files.length; i++) {
+    const file = dt.files[i]
+    if (file.name.toLowerCase().endsWith('.md')) {
+      mdFiles.push({ filename: file.name, content: await file.text() })
+    }
+  }
+
+  if (mdFiles.length === 0) {
+    importError.value = '没有找到 .md 文件，请拖入 Markdown 文件'
+    return
+  }
+
+  // 追加到已拖入的文件列表（去重）
+  const existingNames = new Set(droppedFiles.value.map(f => f.filename))
+  for (const mf of mdFiles) {
+    if (!existingNames.has(mf.filename)) {
+      droppedFiles.value.push(mf)
+      existingNames.add(mf.filename)
+    }
+  }
+  importError.value = ''
+}
+
+// 处理拖入的文件批量导入
+async function handleDroppedFilesImport() {
+  if (droppedFiles.value.length === 0) return
+
+  importSubmitting.value = true
+  importError.value = ''
+  importResults.value = []
+
+  try {
+    await importFilesFromList(droppedFiles.value)
+    droppedFiles.value = []
+  } catch (e: any) {
+    importError.value = '操作出错: ' + (e.message || String(e))
+  } finally {
+    importSubmitting.value = false
+  }
+}
+
+// 处理选择单独文件的 input change
+async function handleFileInputChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = input.files
+  if (!files || files.length === 0) return
+
+  importSubmitting.value = true
+  importError.value = ''
+  importResults.value = []
+
+  try {
+    const mdFiles: { filename: string; content: string }[] = []
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (file.name.toLowerCase().endsWith('.md')) {
+        mdFiles.push({ filename: file.name, content: await file.text() })
+      }
+    }
+    await importFilesFromList(mdFiles)
+  } catch (e: any) {
+    importError.value = '操作出错: ' + (e.message || String(e))
+  } finally {
+    importSubmitting.value = false
+    input.value = ''
+  }
+}
+
+// 公共：从文件列表导入（用于拖拽和选择文件两种场景）
+async function importFilesFromList(mdFiles: { filename: string; content: string }[]) {
+  const dDate = new Date()
+  const yyyy = dDate.getFullYear()
+  const MM = String(dDate.getMonth() + 1).padStart(2, '0')
+  const dd = String(dDate.getDate()).padStart(2, '0')
+  const prefix = `KC-${yyyy}-${MM}-${dd}-`
+
+  const indexData = await $fetch<{ version: number, cards: any[] }>('/api/knowledge')
+  const existingIds = new Set(indexData.cards?.map(c => c.id) || [])
+
+  let maxSeq = 0
+  for (const id of existingIds) {
+    if (id.startsWith(prefix)) {
+      const parts = id.split('-')
+      const seq = parseInt(parts[parts.length - 1], 10)
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq
+      }
+    }
+  }
+
+  const filePayloads: { filename: string, content: string }[] = []
+  const resultsPreview: { status: string, filename: string, message: string, id: string }[] = []
+  const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
+
+  for (const mdFile of mdFiles) {
+    const content = mdFile.content
+    const normalized = content.replace(/^\ufeff/, '')
+    const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
+
+    let existingFileId = ''
+    if (match) {
+      const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+      if (idMatch) {
+        existingFileId = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+      }
+    }
+
+    const baseNameId = mdFile.filename.replace(/\.md$/i, '')
+    const effectiveId = existingFileId && CARD_ID_PATTERN.test(existingFileId) ? existingFileId
+        : (CARD_ID_PATTERN.test(baseNameId) ? baseNameId : '')
+
+    let chosenId = effectiveId
+
+    if (!chosenId || (existingIds.has(chosenId) && !importAllowOverwrite.value)) {
+      maxSeq++
+      chosenId = `${prefix}${String(maxSeq).padStart(3, '0')}`
+      existingIds.add(chosenId)
+    }
+
+    let newContent = content
+    if (!match) {
+      newContent = `---\nid: ${chosenId}\ntitle: ${baseNameId}\n---\n\n${normalized}`
+    } else {
+      const fmContent = match[1]
+      const body = match[2]
+      let newFm = fmContent
+      if (/^id\s*:/m.test(fmContent)) {
+        newFm = fmContent.replace(/^id\s*:.*$/m, `id: ${chosenId}`)
+      } else {
+        newFm = `id: ${chosenId}\n${fmContent}`
+      }
+      newContent = `---\n${newFm}\n---\n${body}`
+    }
+
+    resultsPreview.push({ status: 'imported', id: chosenId, filename: mdFile.filename, message: `已分配 ID ${chosenId}` })
+    filePayloads.push({ filename: `${chosenId}.md`, content: newContent })
+  }
+
+  await uploadFilePayloads(filePayloads, resultsPreview)
 }
 
 // 公共：上传文件到云端
@@ -2069,6 +2284,89 @@ onMounted(() => {
   color: var(--text-secondary);
   margin-bottom: 6px;
   font-weight: 600;
+}
+
+/* Drop zone */
+.kc-drop-zone {
+  margin-top: 12px;
+  border: 2px dashed var(--control-stroke);
+  border-radius: var(--radius-md);
+  padding: 24px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: rgba(255,255,255,0.02);
+}
+.kc-drop-zone:hover {
+  border-color: var(--accent-default);
+  background: rgba(var(--accent-default-rgb, 96, 165, 250), 0.05);
+}
+.kc-drop-zone-active {
+  border-color: var(--accent-default) !important;
+  background: rgba(var(--accent-default-rgb, 96, 165, 250), 0.1) !important;
+  transform: scale(1.01);
+}
+.kc-drop-zone-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.kc-drop-zone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.kc-drop-zone-icon {
+  font-size: 28px;
+}
+.kc-drop-zone-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.kc-drop-zone-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* Dropped files preview */
+.kc-dropped-files-preview {
+  margin-top: 12px;
+  border: 1px solid var(--control-stroke);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: rgba(46, 204, 113, 0.04);
+}
+.kc-dropped-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.fluent-btn-sm {
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+  min-width: auto !important;
+}
+.kc-dropped-files-list {
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kc-dropped-file-item {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kc-import-results {

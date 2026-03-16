@@ -6,5 +6,14 @@ export default defineNuxtConfig({
     experimental: {
       websocket: true
     }
-  }
+  },
+  // 开启 sourcemap，让断点能映射到 .vue 源码
+  sourcemap: {
+    client: true,
+  },
+  vite: {
+    build: {
+      sourcemap: true,
+    },
+  },
 })

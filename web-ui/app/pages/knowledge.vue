@@ -331,6 +331,46 @@
             支持拖入 .md 文件、选择单个文件或选择整个文件夹导入。推算当天的最新卡片序号，<strong>自动处理卡片 ID</strong>，最后同步上传到云端系统。
           </p>
 
+          <div v-if="hasDirectoryPickerAPI" class="kc-default-import-box">
+            <div class="kc-default-import-header">
+              <div class="kc-default-import-meta">
+                <div class="kc-default-import-title">默认文件夹</div>
+                <div class="kc-default-import-name" :class="{ empty: !defaultImportDirConfigured }">
+                  {{ defaultImportDirConfigured ? defaultImportDirName : '未配置' }}
+                </div>
+                <div class="kc-default-import-hint">
+                  配置一次后，可直接复用该目录；浏览器安全限制下仅显示文件夹名，不显示绝对路径。
+                </div>
+                <div class="kc-default-import-status">状态：{{ defaultImportDirPermissionText }}</div>
+                <div v-if="defaultImportDirMessage" class="kc-default-import-message">{{ defaultImportDirMessage }}</div>
+              </div>
+              <div class="kc-default-import-toolbar">
+                <button class="fluent-btn" :disabled="importSubmitting" @click="configureDefaultImportDirectory">
+                  {{ defaultImportDirConfigured ? '重新设置默认文件夹' : '配置默认文件夹' }}
+                </button>
+                <button
+                  v-if="defaultImportDirConfigured"
+                  class="fluent-btn"
+                  :disabled="importSubmitting"
+                  @click="clearDefaultImportDirectory"
+                >
+                  清除默认配置
+                </button>
+              </div>
+            </div>
+            <div v-if="defaultImportDirConfigured" class="kc-default-import-actions">
+              <button class="fluent-btn primary" :disabled="importSubmitting" @click="runWithDefaultImportDirectory('full-import')">
+                {{ importSubmitting ? '处理中...' : '📂 导入默认文件夹' }}
+              </button>
+              <button class="fluent-btn" :disabled="importSubmitting" @click="runWithDefaultImportDirectory('all-missing')">
+                {{ importSubmitting ? '处理中...' : '只刷默认目录（全部）' }}
+              </button>
+              <button class="fluent-btn" :disabled="importSubmitting" @click="runWithDefaultImportDirectory('today-missing')">
+                {{ importSubmitting ? '处理中...' : '只刷默认目录（今天）' }}
+              </button>
+            </div>
+          </div>
+
           <!-- 拖拽区域 -->
           <div
             class="kc-drop-zone"
@@ -344,7 +384,7 @@
               <span class="kc-drop-zone-text">
                 {{ isDragOver ? '松开鼠标以导入文件' : '将 .md 文件拖到此处' }}
               </span>
-              <span class="kc-drop-zone-hint">或点击下方按钮选择文件/文件夹</span>
+              <span class="kc-drop-zone-hint">支持同时拖入多个文件，或点击下方按钮选择</span>
             </div>
           </div>
 
@@ -478,17 +518,41 @@ const searchText = ref('')
 const activeDomains = ref(new Set<string>())
 const activeDifficulties = ref(new Set<number>())
 const activeDateKeys = ref(new Set<string>())
-const dateTabMode = ref<'year' | 'month' | 'week' | 'day'>('month')
+const dateTabMode = ref<'year' | 'month' | 'week' | 'day'>('day')
 const dateTabOptions = [
-  { key: 'year' as const, label: '年' },
-  { key: 'month' as const, label: '月' },
-  { key: 'week' as const, label: '周' },
   { key: 'day' as const, label: '日' },
+  { key: 'week' as const, label: '周' },
+  { key: 'month' as const, label: '月' },
+  { key: 'year' as const, label: '年' },
 ]
 
-// 切换维度时自动清除日期筛选
+function getLatestDateKey(mode: 'year' | 'month' | 'week' | 'day'): string {
+  const keys = new Set<string>()
+  for (const card of cards.value) {
+    const key = getDateKey(card.date, mode)
+    if (key) keys.add(key)
+  }
+  return Array.from(keys).sort((a, b) => b.localeCompare(a))[0] || ''
+}
+
+function syncDefaultDateSelection() {
+  if (dateTabMode.value !== 'day') {
+    activeDateKeys.value = new Set()
+    return
+  }
+
+  const activeKey = Array.from(activeDateKeys.value)[0]
+  if (activeKey && dateGroupItems.value.some(item => item.key === activeKey)) {
+    return
+  }
+
+  const latestDateKey = getLatestDateKey('day')
+  activeDateKeys.value = latestDateKey ? new Set([latestDateKey]) : new Set()
+}
+
+// 切换维度时自动清除日期筛选；切回“日”时默认选中最新日期
 watch(dateTabMode, () => {
-  activeDateKeys.value = new Set()
+  syncDefaultDateSelection()
 })
 const activeTags = ref(new Set<string>())
 
@@ -551,8 +615,34 @@ const hasDirectoryPickerAPI = ref(typeof window !== 'undefined' && 'showDirector
 const pendingFolderAction = ref<FolderActionMode>('full-import')
 const isDragOver = ref(false)
 const droppedFiles = ref<{ filename: string; content: string }[]>([])
+const defaultImportDirName = ref('')
+const defaultImportDirConfigured = ref(false)
+const defaultImportDirPermission = ref<'unknown' | 'granted' | 'prompt' | 'denied' | 'unsupported'>(
+  hasDirectoryPickerAPI.value ? 'unknown' : 'unsupported'
+)
+const defaultImportDirMessage = ref('')
+
+const DEFAULT_IMPORT_DIR_DB_NAME = 'cgtools-knowledge-import'
+const DEFAULT_IMPORT_DIR_STORE_NAME = 'handles'
+const DEFAULT_IMPORT_DIR_KEY = 'knowledge-default-import-directory'
+
+const defaultImportDirPermissionText = computed(() => {
+  switch (defaultImportDirPermission.value) {
+    case 'granted':
+      return '已授权，可直接使用'
+    case 'prompt':
+      return '待授权，使用时会再次请求权限'
+    case 'denied':
+      return '权限已失效，请重新配置或重新授权'
+    case 'unsupported':
+      return '当前浏览器不支持默认文件夹功能'
+    default:
+      return '未检测'
+  }
+})
 
 // Domain colors
+
 const DOMAIN_COLORS: Record<string, string> = {
   'UE4': '#6C5CE7',
   'C++': '#E17055',
@@ -753,9 +843,11 @@ async function refreshCards() {
   try {
     const data = await $fetch<{ cards: KnowledgeCard[] }>('/api/knowledge')
     cards.value = data.cards || []
+    syncDefaultDateSelection()
   } catch (e) {
     console.error('Failed to load cards:', e)
     cards.value = []
+    syncDefaultDateSelection()
   } finally {
     loading.value = false
   }
@@ -1063,7 +1155,165 @@ function updateImportSummary(results: { status: string }[], totalFiles: number) 
   errorsCount.value = results.filter(r => r.status === 'error').length
 }
 
+async function openImportHandleDb(): Promise<IDBDatabase> {
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    throw new Error('当前环境不支持默认文件夹存储')
+  }
+
+  return await new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DEFAULT_IMPORT_DIR_DB_NAME, 1)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(DEFAULT_IMPORT_DIR_STORE_NAME)) {
+        db.createObjectStore(DEFAULT_IMPORT_DIR_STORE_NAME)
+      }
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error || new Error('打开默认文件夹存储失败'))
+  })
+}
+
+async function getStoredDefaultImportDirectoryHandle(): Promise<any | null> {
+  const db = await openImportHandleDb()
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction(DEFAULT_IMPORT_DIR_STORE_NAME, 'readonly')
+    const store = tx.objectStore(DEFAULT_IMPORT_DIR_STORE_NAME)
+    const request = store.get(DEFAULT_IMPORT_DIR_KEY)
+    request.onsuccess = () => resolve(request.result || null)
+    request.onerror = () => reject(request.error || new Error('读取默认文件夹失败'))
+    tx.oncomplete = () => db.close()
+    tx.onerror = () => {
+      db.close()
+      reject(tx.error || new Error('读取默认文件夹失败'))
+    }
+  })
+}
+
+async function saveStoredDefaultImportDirectoryHandle(dirHandle: any) {
+  const db = await openImportHandleDb()
+  return await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(DEFAULT_IMPORT_DIR_STORE_NAME, 'readwrite')
+    const store = tx.objectStore(DEFAULT_IMPORT_DIR_STORE_NAME)
+    const request = store.put(dirHandle, DEFAULT_IMPORT_DIR_KEY)
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error || new Error('保存默认文件夹失败'))
+    tx.oncomplete = () => db.close()
+    tx.onerror = () => {
+      db.close()
+      reject(tx.error || new Error('保存默认文件夹失败'))
+    }
+  })
+}
+
+async function clearStoredDefaultImportDirectoryHandle() {
+  const db = await openImportHandleDb()
+  return await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(DEFAULT_IMPORT_DIR_STORE_NAME, 'readwrite')
+    const store = tx.objectStore(DEFAULT_IMPORT_DIR_STORE_NAME)
+    const request = store.delete(DEFAULT_IMPORT_DIR_KEY)
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error || new Error('清除默认文件夹失败'))
+    tx.oncomplete = () => db.close()
+    tx.onerror = () => {
+      db.close()
+      reject(tx.error || new Error('清除默认文件夹失败'))
+    }
+  })
+}
+
+async function queryDirectoryPermission(handle: any, mode: 'read' | 'readwrite'): Promise<'granted' | 'prompt' | 'denied'> {
+  if (!handle) return 'denied'
+  if (typeof handle.queryPermission !== 'function') return 'granted'
+  try {
+    return await handle.queryPermission({ mode })
+  } catch {
+    return 'denied'
+  }
+}
+
+async function ensureDirectoryPermission(handle: any, mode: 'read' | 'readwrite') {
+  const current = await queryDirectoryPermission(handle, mode)
+  if (current === 'granted') return true
+  if (typeof handle.requestPermission !== 'function') return false
+  try {
+    return (await handle.requestPermission({ mode })) === 'granted'
+  } catch {
+    return false
+  }
+}
+
+async function refreshDefaultImportDirectoryState() {
+  if (!hasDirectoryPickerAPI.value) {
+    defaultImportDirConfigured.value = false
+    defaultImportDirName.value = ''
+    defaultImportDirPermission.value = 'unsupported'
+    return
+  }
+
+  try {
+    const dirHandle = await getStoredDefaultImportDirectoryHandle()
+    if (!dirHandle) {
+      defaultImportDirConfigured.value = false
+      defaultImportDirName.value = ''
+      defaultImportDirPermission.value = 'unknown'
+      return
+    }
+
+    defaultImportDirConfigured.value = true
+    defaultImportDirName.value = dirHandle.name || '未命名文件夹'
+    defaultImportDirPermission.value = await queryDirectoryPermission(dirHandle, 'read')
+  } catch (e: any) {
+    defaultImportDirConfigured.value = false
+    defaultImportDirName.value = ''
+    defaultImportDirPermission.value = 'denied'
+    defaultImportDirMessage.value = '读取默认文件夹配置失败: ' + (e.message || String(e))
+  }
+}
+
+async function configureDefaultImportDirectory() {
+  if (!(window as any).showDirectoryPicker) {
+    defaultImportDirMessage.value = '当前浏览器不支持默认文件夹功能'
+    return
+  }
+
+  defaultImportDirMessage.value = ''
+  try {
+    const dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
+    const granted = await ensureDirectoryPermission(dirHandle, 'readwrite')
+    if (!granted) {
+      defaultImportDirPermission.value = 'denied'
+      defaultImportDirMessage.value = '未授予默认文件夹访问权限'
+      return
+    }
+
+    await saveStoredDefaultImportDirectoryHandle(dirHandle)
+    await refreshDefaultImportDirectoryState()
+    defaultImportDirPermission.value = 'granted'
+    defaultImportDirMessage.value = `已设置默认文件夹：${dirHandle.name}`
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      defaultImportDirMessage.value = '已取消默认文件夹选择'
+    } else {
+      defaultImportDirMessage.value = '设置默认文件夹失败: ' + (e.message || String(e))
+    }
+  }
+}
+
+async function clearDefaultImportDirectory() {
+  defaultImportDirMessage.value = ''
+  try {
+    await clearStoredDefaultImportDirectoryHandle()
+    defaultImportDirConfigured.value = false
+    defaultImportDirName.value = ''
+    defaultImportDirPermission.value = 'unknown'
+    defaultImportDirMessage.value = '已清除默认文件夹配置'
+  } catch (e: any) {
+    defaultImportDirMessage.value = '清除默认文件夹失败: ' + (e.message || String(e))
+  }
+}
+
 async function collectMdFilesFromDirectoryHandle(dirHandle: any) {
+
   const files: { filename: string; content: string }[] = []
   for await (const entry of dirHandle.values()) {
     if (entry.kind !== 'file' || !entry.name.toLowerCase().endsWith('.md')) continue
@@ -1096,8 +1346,7 @@ async function quickSyncMissingCards(mode: QuickSyncMode) {
 
   try {
     const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' })
-    const localFiles = await collectMdFilesFromDirectoryHandle(dirHandle)
-    await syncMissingCardsFromLocalFiles(localFiles, mode)
+    await handleDirectoryActionWithHandle(dirHandle, mode)
   } catch (e: any) {
     if (e.name === 'AbortError') {
       importError.value = '文件操作已取消'
@@ -1108,6 +1357,45 @@ async function quickSyncMissingCards(mode: QuickSyncMode) {
     importSubmitting.value = false
   }
 }
+
+async function runWithDefaultImportDirectory(mode: FolderActionMode) {
+  if (!defaultImportDirConfigured.value) {
+    defaultImportDirMessage.value = '请先配置默认文件夹'
+    return
+  }
+
+  importSubmitting.value = true
+  importError.value = ''
+  importResults.value = []
+  defaultImportDirMessage.value = ''
+
+  try {
+    const dirHandle = await getStoredDefaultImportDirectoryHandle()
+    if (!dirHandle) {
+      defaultImportDirConfigured.value = false
+      defaultImportDirName.value = ''
+      defaultImportDirPermission.value = 'unknown'
+      defaultImportDirMessage.value = '默认文件夹配置已失效，请重新设置'
+      return
+    }
+
+    const permissionMode = mode === 'full-import' ? 'readwrite' : 'read'
+    const granted = await ensureDirectoryPermission(dirHandle, permissionMode)
+    await refreshDefaultImportDirectoryState()
+    if (!granted) {
+      defaultImportDirMessage.value = '默认文件夹未授权，请重新授权或重新设置'
+      return
+    }
+
+    defaultImportDirPermission.value = 'granted'
+    await handleDirectoryActionWithHandle(dirHandle, mode)
+  } catch (e: any) {
+    importError.value = '操作出错: ' + (e.message || String(e))
+  } finally {
+    importSubmitting.value = false
+  }
+}
+
 
 async function syncMissingCardsFromLocalFiles(
   localFiles: { filename: string; content: string }[],
@@ -1186,6 +1474,8 @@ function openImportModal() {
   importedCount.value = 0
   skippedCount.value = 0
   errorsCount.value = 0
+  defaultImportDirMessage.value = ''
+  void refreshDefaultImportDirectoryState()
 }
 
 function closeImportModal() {
@@ -1196,8 +1486,112 @@ function closeImportModal() {
   droppedFiles.value = []
 }
 
+async function handleDirectoryActionWithHandle(dirHandle: any, mode: FolderActionMode) {
+  if (mode !== 'full-import') {
+    const localFiles = await collectMdFilesFromDirectoryHandle(dirHandle)
+    await syncMissingCardsFromLocalFiles(localFiles, mode)
+    return
+  }
+
+  const dDate = new Date()
+  const yyyy = dDate.getFullYear()
+  const MM = String(dDate.getMonth() + 1).padStart(2, '0')
+  const dd = String(dDate.getDate()).padStart(2, '0')
+  const prefix = `KC-${yyyy}-${MM}-${dd}-`
+
+  const indexData = await $fetch<{ version: number, cards: any[] }>('/api/knowledge')
+  const existingIds = new Set(indexData.cards?.map(c => c.id) || [])
+
+  let maxSeq = 0
+  for (const id of existingIds) {
+    if (id.startsWith(prefix)) {
+      const parts = id.split('-')
+      const seq = parseInt(parts[parts.length - 1], 10)
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq
+      }
+    }
+  }
+
+  const filePayloads: { filename: string, content: string }[] = []
+  const resultsPreview: { status: string, filename: string, message: string, id: string }[] = []
+
+  for await (const entry of (dirHandle as any).values()) {
+    if (entry.kind !== 'file' || !entry.name.toLowerCase().endsWith('.md')) continue
+
+    const fileHandle = entry
+    const file = await fileHandle.getFile()
+    const content = await file.text()
+    const normalized = content.replace(/^\ufeff/, '')
+    const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
+
+    let existingFileId = ''
+    if (match) {
+      const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+      if (idMatch) {
+        existingFileId = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+      }
+    }
+
+    const baseNameId = file.name.replace(/\.md$/i, '')
+    const effectiveId = existingFileId && CARD_ID_PATTERN.test(existingFileId) ? existingFileId
+      : (CARD_ID_PATTERN.test(baseNameId) ? baseNameId : '')
+
+    let chosenId = effectiveId
+    let needUpdateFile = false
+
+    if (!chosenId || (existingIds.has(chosenId) && !importAllowOverwrite.value)) {
+      maxSeq++
+      chosenId = `${prefix}${String(maxSeq).padStart(3, '0')}`
+      needUpdateFile = true
+      existingIds.add(chosenId)
+    } else if (chosenId !== existingFileId || entry.name !== `${chosenId}.md`) {
+      needUpdateFile = true
+    }
+
+    let newContent = content
+    if (needUpdateFile) {
+      if (!match) {
+        newContent = `---\nid: ${chosenId}\ntitle: ${baseNameId}\n---\n\n${normalized}`
+      } else {
+        const fmContent = match[1]
+        const body = match[2]
+        let newFm = fmContent
+        if (/^id\s*:/m.test(fmContent)) {
+          newFm = fmContent.replace(/^id\s*:.*$/m, `id: ${chosenId}`)
+        } else {
+          newFm = `id: ${chosenId}\n${fmContent}`
+        }
+        newContent = `---\n${newFm}\n---\n${body}`
+      }
+
+      try {
+        if (entry.name !== `${chosenId}.md`) {
+          const newFileHandle = await dirHandle.getFileHandle(`${chosenId}.md`, { create: true })
+          const writable = await newFileHandle.createWritable()
+          await writable.write(newContent)
+          await writable.close()
+
+          await dirHandle.removeEntry(entry.name)
+          resultsPreview.push({ status: 'imported', id: chosenId, filename: entry.name, message: `已重命名为 ${chosenId}.md 并规范内容` })
+        } else {
+          const writable = await fileHandle.createWritable()
+          await writable.write(newContent)
+          await writable.close()
+          resultsPreview.push({ status: 'imported', id: chosenId, filename: entry.name, message: `已更新文件内的 ID 为 ${chosenId}` })
+        }
+      } catch (err: any) {
+        resultsPreview.push({ status: 'error', id: chosenId, filename: entry.name, message: `本地文件修改失败: ${err.message}` })
+      }
+    }
+
+    filePayloads.push({ filename: `${chosenId}.md`, content: newContent })
+  }
+
+  await uploadFilePayloads(filePayloads, resultsPreview)
+}
+
 async function handleDirectoryImport() {
-  // 如果不支持 showDirectoryPicker，使用 input fallback
   if (!(window as any).showDirectoryPicker) {
     pendingFolderAction.value = 'full-import'
     folderInputRef.value?.click()
@@ -1210,112 +1604,7 @@ async function handleDirectoryImport() {
 
   try {
     const dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
-    
-    // 获取当天的前缀
-    const dDate = new Date()
-    const yyyy = dDate.getFullYear()
-    const MM = String(dDate.getMonth() + 1).padStart(2, '0')
-    const dd = String(dDate.getDate()).padStart(2, '0')
-    const prefix = `KC-${yyyy}-${MM}-${dd}-`
-
-    // 获取云端卡片列表
-    const indexData = await $fetch<{ version: number, cards: any[] }>('/api/knowledge')
-    const existingIds = new Set(indexData.cards?.map(c => c.id) || [])
-    
-    let maxSeq = 0
-    for (const id of existingIds) {
-      if (id.startsWith(prefix)) {
-        const parts = id.split('-')
-        const seq = parseInt(parts[parts.length - 1], 10)
-        if (!isNaN(seq) && seq > maxSeq) {
-          maxSeq = seq
-        }
-      }
-    }
-    
-    const filePayloads: { filename: string, content: string }[] = []
-    const resultsPreview: { status: string, filename: string, message: string, id: string }[] = []
-    
-    for await (const entry of (dirHandle as any).values()) {
-      if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.md')) {
-        const fileHandle = entry
-        const file = await fileHandle.getFile()
-        const content = await file.text()
-        
-        const normalized = content.replace(/^\ufeff/, '')
-        const match = normalized.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/)
-        
-        let existingFileId = ''
-        if (match) {
-          const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
-          if (idMatch) {
-            existingFileId = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
-          }
-        }
-        
-        const baseNameId = file.name.replace(/\.md$/i, '')
-        const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
-        
-        const effectiveId = existingFileId && CARD_ID_PATTERN.test(existingFileId) ? existingFileId 
-            : (CARD_ID_PATTERN.test(baseNameId) ? baseNameId : '')
-            
-        let chosenId = effectiveId
-        let needUpdateFile = false
-        
-        // 自动分配新序号：1.完全没序号 2.在云端存在且不想覆盖 3.前缀不对(跨天等，这里暂时只判断冲突)
-        if (!chosenId || (existingIds.has(chosenId) && !importAllowOverwrite.value)) {
-          maxSeq++
-          chosenId = `${prefix}${String(maxSeq).padStart(3, '0')}`
-          needUpdateFile = true
-          existingIds.add(chosenId)
-        } else if (chosenId !== existingFileId || entry.name !== `${chosenId}.md`) {
-          // 有效序号，但文件名不同或内容 frontmatter 中不一致，则强制修复
-          needUpdateFile = true
-        }
-
-        let newContent = content
-        if (needUpdateFile) {
-          if (!match) { // 无 frontmatter
-            newContent = `---\nid: ${chosenId}\ntitle: ${baseNameId}\n---\n\n${normalized}`
-          } else {
-            const fmContent = match[1]
-            const body = match[2]
-            let newFm = fmContent
-            if (/^id\s*:/m.test(fmContent)) {
-              newFm = fmContent.replace(/^id\s*:.*$/m, `id: ${chosenId}`)
-            } else {
-              newFm = `id: ${chosenId}\n${fmContent}`
-            }
-            newContent = `---\n${newFm}\n---\n${body}`
-          }
-          
-          try {
-            if (entry.name !== `${chosenId}.md`) {
-              // 重命名逻辑：新建 + 删除旧的
-              const newFileHandle = await dirHandle.getFileHandle(`${chosenId}.md`, { create: true })
-              const writable = await newFileHandle.createWritable()
-              await writable.write(newContent)
-              await writable.close()
-              
-              await dirHandle.removeEntry(entry.name)
-              resultsPreview.push({ status: 'imported', id: chosenId, filename: entry.name, message: `已重命名为 ${chosenId}.md 并规范内容` })
-            } else {
-              // 修改同名文件
-              const writable = await fileHandle.createWritable()
-              await writable.write(newContent)
-              await writable.close()
-              resultsPreview.push({ status: 'imported', id: chosenId, filename: entry.name, message: `已更新文件内的 ID 为 ${chosenId}` })
-            }
-          } catch(err: any) {
-             resultsPreview.push({ status: 'error', id: chosenId, filename: entry.name, message: `本地文件修改失败: ${err.message}` })
-          }
-        }
-        
-        filePayloads.push({ filename: `${chosenId}.md`, content: newContent })
-      }
-    }
-    
-    await uploadFilePayloads(filePayloads, resultsPreview)
+    await handleDirectoryActionWithHandle(dirHandle, 'full-import')
   } catch (e: any) {
     if (e.name === 'AbortError') {
       importError.value = '文件操作已被取消'
@@ -1326,6 +1615,7 @@ async function handleDirectoryImport() {
     importSubmitting.value = false
   }
 }
+
 
 // Fallback: 处理 <input webkitdirectory> 选择的文件
 async function handleFolderInputChange(event: Event) {
@@ -1432,12 +1722,12 @@ async function handleFolderInputChange(event: Event) {
 }
 
 // 拖拽事件处理
-function onDragOver(e: DragEvent) {
+function onDragOver(_e: DragEvent) {
   if (importSubmitting.value) return
   isDragOver.value = true
 }
 
-function onDragLeave(e: DragEvent) {
+function onDragLeave(_e: DragEvent) {
   isDragOver.value = false
 }
 
@@ -1446,18 +1736,28 @@ async function onDropFiles(e: DragEvent) {
   if (importSubmitting.value) return
   
   const dt = e.dataTransfer
-  if (!dt || !dt.files || dt.files.length === 0) return
+  if (!dt) return
 
+  // 先通过 items 获取所有 File 对象（比 dt.files 更可靠）
+  const rawFiles: File[] = []
+  if (dt.items && dt.items.length > 0) {
+    for (let i = 0; i < dt.items.length; i++) {
+      if (dt.items[i].kind === 'file') {
+        const f = dt.items[i].getAsFile()
+        if (f) rawFiles.push(f)
+      }
+    }
+  }
+  
   const mdFiles: { filename: string; content: string }[] = []
-  for (let i = 0; i < dt.files.length; i++) {
-    const file = dt.files[i]
+  for (const file of rawFiles) {
     if (file.name.toLowerCase().endsWith('.md')) {
       mdFiles.push({ filename: file.name, content: await file.text() })
     }
   }
 
   if (mdFiles.length === 0) {
-    importError.value = '没有找到 .md 文件，请拖入 Markdown 文件'
+    importError.value = `拖入了 ${rawFiles.length} 个文件，但没有找到 .md 文件`
     return
   }
 
@@ -1642,48 +1942,98 @@ async function uploadFilePayloads(
   }
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function normalizeExternalUrl(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (/^(https?:\/\/|mailto:)/i.test(trimmed)) return trimmed
+  return null
+}
+
+function renderExternalLink(url: string, label?: string): string {
+  const normalized = normalizeExternalUrl(url)
+  const safeLabel = escapeHtml(label?.trim() || url)
+  if (!normalized) return safeLabel
+  const safeUrl = escapeHtml(normalized)
+  return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`
+}
+
+function linkifyPlainUrls(text: string): string {
+  return text.replace(/https?:\/\/[^\s<]+/gi, (matched) => {
+    const trailing = matched.match(/[),.;!?，。；！？、】【》」』）]+$/)?.[0] || ''
+    const rawUrl = trailing ? matched.slice(0, -trailing.length) : matched
+    return `${renderExternalLink(rawUrl)}${escapeHtml(trailing)}`
+  })
+}
+
+function renderInlineMarkdown(text: string): string {
+  const tokens: string[] = []
+  const stash = (html: string) => {
+    const token = `@@KC_TOKEN_${tokens.length}@@`
+    tokens.push(html)
+    return token
+  }
+
+  let rendered = text
+
+  rendered = rendered.replace(/`([^`]+)`/g, (_m, code) => {
+    return stash(`<code>${escapeHtml(code)}</code>`)
+  })
+
+  rendered = rendered.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label, url) => {
+    return stash(renderExternalLink(url, label))
+  })
+
+  rendered = escapeHtml(rendered)
+  rendered = rendered.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  rendered = linkifyPlainUrls(rendered)
+
+  return rendered.replace(/@@KC_TOKEN_(\d+)@@/g, (_m, index) => tokens[Number(index)] || '')
+}
+
 // Simple Markdown -> HTML
 function markdownToHtml(md: string): string {
   if (!md) return ''
-  let html = md
-
-  // Code blocks
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
-    const l = lang || 'text'
-    const escaped = code.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    return `<pre><code class="language-${l}">${escaped}</code></pre>`
+  const codeBlocks: string[] = []
+  let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
+    const l = escapeHtml(lang || 'text')
+    const escaped = escapeHtml(code.trim())
+    const token = `@@KC_BLOCK_${codeBlocks.length}@@`
+    codeBlocks.push(`<pre><code class="language-${l}">${escaped}</code></pre>`)
+    return token
   })
 
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
+  html = html.replace(/^### (.+)$/gm, (_m, title) => `<h4>${renderInlineMarkdown(title)}</h4>`)
+  html = html.replace(/^## (.+)$/gm, (_m, title) => `<h3>${renderInlineMarkdown(title)}</h3>`)
+  html = html.replace(/^# (.+)$/gm, (_m, title) => `<h2>${renderInlineMarkdown(title)}</h2>`)
+  html = html.replace(/^>\s*(.+)$/gm, (_m, content) => `<blockquote>${renderInlineMarkdown(content)}</blockquote>`)
+  html = html.replace(/^- (.+)$/gm, (_m, content) => `<li>${renderInlineMarkdown(content)}</li>`)
 
-  // Headers
-  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>')
-  html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>')
-  html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>')
-
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-
-  // Blockquote
-  html = html.replace(/^>\s*(.+)$/gm, '<blockquote>$1</blockquote>')
-
-  // List items
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
-
-  // Paragraphs
   const lines = html.split('\n')
   const result: string[] = []
   for (const line of lines) {
     const stripped = line.trim()
-    if (stripped && !stripped.startsWith('<')) {
-      result.push(`<p>${stripped}</p>`)
-    } else {
+    if (!stripped) {
       result.push(line)
+      continue
     }
+    if (stripped.startsWith('<') || stripped.startsWith('@@KC_BLOCK_')) {
+      result.push(line)
+      continue
+    }
+    result.push(`<p>${renderInlineMarkdown(stripped)}</p>`)
   }
-  html = result.join('\n')
 
+  html = result.join('\n')
+  html = html.replace(/@@KC_BLOCK_(\d+)@@/g, (_m, index) => codeBlocks[Number(index)] || '')
   return html
 }
 
@@ -1713,6 +2063,7 @@ function onKeyDown(e: KeyboardEvent) {
 
 onMounted(() => {
   refreshCards()
+  void refreshDefaultImportDirectoryState()
   document.addEventListener('keydown', onKeyDown)
 })
 </script>
@@ -2204,6 +2555,15 @@ onMounted(() => {
 }
 .kc-modal-body :deep(strong) {
   color: var(--text-primary);
+}
+.kc-modal-body :deep(a) {
+  color: var(--accent-default);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.kc-modal-body :deep(a:hover) {
+  color: #8bddff;
 }
 .kc-modal-body :deep(blockquote) {
   border-left: 3px solid var(--accent-default);

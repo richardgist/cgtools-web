@@ -1,7 +1,31 @@
-import { defineEventHandler } from 'h3'
+import { defineEventHandler, getQuery } from 'h3'
 import * as fs from 'fs'
 import * as path from 'path'
 import { spawnSync } from 'child_process'
+
+const DEFAULT_PROJECT_ROOT = 'C:\\CJGame\\PRE418'
+
+const normalizeProjectRoot = (value: string) => {
+  const normalized = String(value || '').trim().replace(/\//g, '\\')
+  if (!normalized) {
+    return DEFAULT_PROJECT_ROOT
+  }
+  if (/^[A-Za-z]:\\?$/.test(normalized)) {
+    return `${normalized.slice(0, 2)}\\`
+  }
+  return normalized.replace(/[\\]+$/, '')
+}
+
+const buildSharedPaths = (projectRoot: string) => {
+  const resolvedProjectRoot = normalizeProjectRoot(projectRoot)
+  return {
+    projectRoot: resolvedProjectRoot,
+    projectFile: path.join(resolvedProjectRoot, 'Survive', 'ShadowTrackerExtra.uproject'),
+    engineRoot: path.join(resolvedProjectRoot, 'UE4181', 'Engine'),
+    ueAppToolsExe: path.join(resolvedProjectRoot, 'Survive', 'Tools', 'UEAppTools', 'build', 'Release', 'UEAppTools.exe'),
+    androidInjectDir: path.join(resolvedProjectRoot, 'Survive', 'ExternalTools', 'AndroidInject'),
+  }
+}
 
 const probeCommand = (cmd: string, args: string[]) => {
   const result = spawnSync(cmd, args, {
@@ -12,12 +36,16 @@ const probeCommand = (cmd: string, args: string[]) => {
   return result.status === 0
 }
 
-export default defineEventHandler(async () => {
-  const projectRoot = 'C:\\CJGame\\PRE418'
-  const projectFile = path.join(projectRoot, 'Survive', 'ShadowTrackerExtra.uproject')
-  const engineRoot = path.join(projectRoot, 'UE4181', 'Engine')
-  const ueAppToolsExe = path.join(projectRoot, 'Survive', 'Tools', 'UEAppTools', 'build', 'Release', 'UEAppTools.exe')
-  const androidInjectDir = path.join(projectRoot, 'Survive', 'ExternalTools', 'AndroidInject')
+export default defineEventHandler(async (event) => {
+  const query = getQuery(event)
+  const requestedProjectRoot = typeof query.projectRoot === 'string' ? query.projectRoot : DEFAULT_PROJECT_ROOT
+  const {
+    projectRoot,
+    projectFile,
+    engineRoot,
+    ueAppToolsExe,
+    androidInjectDir,
+  } = buildSharedPaths(requestedProjectRoot)
 
   const injectDemoPath = path.join(androidInjectDir, 'inject_demo')
   const injectEntryPath = path.join(androidInjectDir, 'lib_inject_entry.so')
@@ -45,4 +73,3 @@ export default defineEventHandler(async () => {
     },
   }
 })
-

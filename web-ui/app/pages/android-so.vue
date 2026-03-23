@@ -499,7 +499,7 @@ const commandPreview = computed(() => {
     const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultBuildLogPath.value
     const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
 
-    return `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} ${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
+    return `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
   }
   if (activeTab.value === 'replaceA') {
     return `${quote(sharedPaths.value.ueAppToolsExe)} -mode=replaceSo -platform=android -apkPath=${quote(settings.apkPath)} -soPath=${quote(settings.soPath)} -arch=${settings.arch}`

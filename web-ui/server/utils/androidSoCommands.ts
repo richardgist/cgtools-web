@@ -50,6 +50,8 @@ export interface CommandStep {
 
 export interface JobPlan {
   steps: CommandStep[]
+  cleanupSteps?: CommandStep[]
+  outputSoCandidates?: string[]
   preview: string
   validationErrors: string[]
   warnings: string[]
@@ -58,6 +60,9 @@ export interface JobPlan {
 
 const VALID_ARCHES = new Set<AndroidArch>(['arm64-v8a', 'armeabi-v7a', 'x86_64'])
 const VALID_CONFIGS = new Set<BuildConfig>(['Development', 'Test', 'Shipping'])
+const REPLACE_MANAGER_DIR = 'I:\\cgtools\\ReplaceManager\\RevertTool'
+const REPLACE_MANAGER_REPLACE_BAT = path.join(REPLACE_MANAGER_DIR, 'Replace.bat')
+const REPLACE_MANAGER_CLEAN_BAT = path.join(REPLACE_MANAGER_DIR, 'Clean.bat')
 
 const quoteArg = (value: string) => {
   if (value.length === 0) return '""'
@@ -91,6 +96,32 @@ const buildReplaceOutputApk = (apkPath: string) => {
   return `${apkPath.slice(0, -ext.length)}_so_replaced${ext}`
 }
 
+const getAndroidBinaryArchCandidates = (arch: AndroidArch) => {
+  if (arch === 'arm64-v8a') return ['arm64', 'arm64-v8a']
+  if (arch === 'armeabi-v7a') return ['armv7', 'armeabi-v7a']
+  return ['x64', 'x86_64']
+}
+
+const buildAndroidSoOutputCandidates = (projectFile: string, config: BuildConfig, arch: AndroidArch) => {
+  const projectDir = path.dirname(projectFile || '')
+  const targetName = path.basename(projectFile || '', path.extname(projectFile || ''))
+  const binariesDir = path.join(projectDir, 'Binaries', 'Android')
+  const archCandidates = getAndroidBinaryArchCandidates(arch)
+  const fileCandidates: string[] = []
+
+  for (const archName of archCandidates) {
+    fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${config}-${archName}-es2.so`))
+    fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${config}-${archName}.so`))
+    if (config === 'Development') {
+      fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${archName}-es2.so`))
+      fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${archName}.so`))
+    }
+  }
+
+  fileCandidates.push(path.join(projectDir, 'Intermediate', 'Android', 'APK', 'jni', arch || 'arm64-v8a', 'libUE4.so'))
+  return [...new Set(fileCandidates)]
+}
+
 const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   const errors: string[] = []
   const warnings: string[] = []
@@ -101,7 +132,8 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   const resolvedLogPath = (payload.logPath || '').trim()
     ? (path.isAbsolute((payload.logPath || '').trim()) ? (payload.logPath || '').trim() : path.join(payload.projectRoot || '', (payload.logPath || '').trim()))
     : defaultLogPath
-  const outputSoPath = path.join(projectDir, 'Intermediate', 'Android', 'APK', 'jni', payload.arch || 'arm64-v8a', 'libUE4.so')
+  const outputSoCandidates = buildAndroidSoOutputCandidates(payload.projectFile, payload.config, payload.arch)
+  const outputSoPath = outputSoCandidates[0]
   const archArgMap: Record<AndroidArch, string> = {
     'arm64-v8a': '-arm64',
     'armeabi-v7a': '-armv7',
@@ -116,6 +148,8 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   addValidation(errors, fs.existsSync(payload.projectFile || ''), `projectFile not found: ${payload.projectFile}`)
   addValidation(errors, fs.existsSync(payload.engineRoot || ''), `engineRoot not found: ${payload.engineRoot}`)
   addValidation(errors, fs.existsSync(ubtExe), `UnrealBuildTool.exe not found: ${ubtExe}`)
+  addValidation(errors, fs.existsSync(REPLACE_MANAGER_REPLACE_BAT), `Replace.bat not found: ${REPLACE_MANAGER_REPLACE_BAT}`)
+  addValidation(errors, fs.existsSync(REPLACE_MANAGER_CLEAN_BAT), `clean.bat not found: ${REPLACE_MANAGER_CLEAN_BAT}`)
   addValidation(errors, VALID_ARCHES.has(payload.arch), `Unsupported arch: ${payload.arch}`)
   addValidation(errors, VALID_CONFIGS.has(payload.config), `Unsupported config: ${payload.config}`)
   addValidation(errors, !!targetName, `Unable to resolve target name from projectFile: ${payload.projectFile}`)
@@ -125,11 +159,12 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     `maxParallelActions must be an integer between 1 and 128, got: ${payload.maxParallelActions}`,
   )
 
-  const args = [
+  const commonArgs = [
     targetName,
     'Android',
     payload.config,
     `-Project=${payload.projectFile}`,
+    payload.projectFile,
     '-NoUBTMakefiles',
     `-remoteini=${projectDir}`,
     '-skipdeploy',
@@ -138,6 +173,18 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     ...(payload.config === 'Shipping' ? ['-ShippingDev'] : []),
     '-forceframepointer',
     '-noxge',
+  ].filter(Boolean) as string[]
+
+  const manifestArgs = [
+    ...commonArgs,
+    '-generatemanifest',
+    ...(hasMaxParallelActions ? [`-MaxParallelActions=${maxParallelActions}`] : []),
+    `-log=${resolvedLogPath}`,
+    '-NoHotReload',
+  ].filter(Boolean) as string[]
+
+  const buildArgs = [
+    ...commonArgs,
     ...(hasMaxParallelActions ? [`-MaxParallelActions=${maxParallelActions}`] : []),
     `-log=${resolvedLogPath}`,
     '-NoHotReload',
@@ -147,17 +194,47 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     warnings.push('ShippingDev is only added when config=Shipping.')
   }
   warnings.push(`UBT log will be written to: ${resolvedLogPath}`)
+  warnings.push(`ReplaceManager prep script: ${REPLACE_MANAGER_REPLACE_BAT}`)
+  warnings.push(`ReplaceManager cleanup script will run after build: ${REPLACE_MANAGER_CLEAN_BAT}`)
 
-  const step: CommandStep = {
-    name: 'Build Android SO with UBT',
+  const replaceManagerStep: CommandStep = {
+    name: 'Prepare ReplaceManager patch',
+    cmd: REPLACE_MANAGER_REPLACE_BAT,
+    args: [],
+    cwd: REPLACE_MANAGER_DIR,
+  }
+
+  const manifestStep: CommandStep = {
+    name: 'Generate UBT manifest',
     cmd: ubtExe,
-    args,
+    args: manifestArgs,
     cwd: payload.projectRoot,
   }
 
+  const buildStep: CommandStep = {
+    name: 'Build Android SO with UBT',
+    cmd: ubtExe,
+    args: buildArgs,
+    cwd: payload.projectRoot,
+  }
+
+  const restoreReplaceManagerStep: CommandStep = {
+    name: 'Restore ReplaceManager state',
+    cmd: REPLACE_MANAGER_CLEAN_BAT,
+    args: [],
+    cwd: REPLACE_MANAGER_DIR,
+  }
+
   return {
-    steps: [step],
-    preview: renderCommand(step.cmd, step.args, step.cwd),
+    steps: [replaceManagerStep, manifestStep, buildStep],
+    cleanupSteps: [restoreReplaceManagerStep],
+    outputSoCandidates,
+    preview: [
+      renderCommand(replaceManagerStep.cmd, replaceManagerStep.args, replaceManagerStep.cwd),
+      renderCommand(manifestStep.cmd, manifestStep.args, manifestStep.cwd),
+      renderCommand(buildStep.cmd, buildStep.args, buildStep.cwd),
+      renderCommand(restoreReplaceManagerStep.cmd, restoreReplaceManagerStep.args, restoreReplaceManagerStep.cwd),
+    ].join('\n'),
     validationErrors: errors,
     warnings,
     outputs: {
@@ -199,6 +276,8 @@ const buildReplaceSoPlan = (payload: ReplaceAPayload): JobPlan => {
 
   return {
     steps: [step],
+    cleanupSteps: [],
+    outputSoCandidates: [],
     preview: renderCommand(step.cmd, step.args, step.cwd),
     validationErrors: errors,
     warnings,
@@ -286,6 +365,8 @@ const buildInjectPlan = (payload: InjectBPayload): JobPlan => {
 
   return {
     steps,
+    cleanupSteps: [],
+    outputSoCandidates: [],
     preview: steps.map((step) => renderCommand(step.cmd, step.args, step.cwd)).join('\n'),
     validationErrors: errors,
     warnings,
@@ -327,28 +408,38 @@ const buildPushSoPlan = (payload: PushSoPayload): JobPlan => {
   const remotePath = normalizePushDestination(payload.remotePath || '')
   if (payload.useRunAs) {
     const packageName = (payload.packageName || '').trim()
-    const parentDir = path.posix.dirname(remotePath)
-    const copyCmd = `run-as ${packageName} sh -c 'mkdir -p ${parentDir} && cp /data/local/tmp/libUE4.so ${remotePath} && ls -l ${remotePath}'`
     const steps: CommandStep[] = [
       {
-        name: 'Push SO to /data/local/tmp',
+        name: 'Push target libUE4.so to temp path',
         cmd: 'adb',
         args: ['push', payload.soPath, '/data/local/tmp/libUE4.so'],
       },
       {
-        name: 'Copy SO into app sandbox target path',
+        name: 'Ensure app_lib exists',
         cmd: 'adb',
-        args: ['shell', copyCmd],
+        args: ['shell', 'run-as', packageName, 'mkdir', '-p', 'app_lib'],
+      },
+      {
+        name: 'Copy SO into app_lib',
+        cmd: 'adb',
+        args: ['shell', 'run-as', packageName, 'cp', '/data/local/tmp/libUE4.so', 'app_lib/libUE4.so'],
+      },
+      {
+        name: 'Verify libUE4.so in app_lib',
+        cmd: 'adb',
+        args: ['shell', 'run-as', packageName, 'ls', '-l', 'app_lib/libUE4.so'],
       },
     ]
     warnings.push(`Run-as mode enabled, target package: ${packageName}`)
     return {
       steps,
+      cleanupSteps: [],
+      outputSoCandidates: [],
       preview: steps.map((step) => renderCommand(step.cmd, step.args, step.cwd)).join('\n'),
       validationErrors: errors,
       warnings,
       outputs: {
-        remoteSoPath: remotePath,
+        remoteSoPath: 'app_lib/libUE4.so',
       },
     }
   }
@@ -361,6 +452,8 @@ const buildPushSoPlan = (payload: PushSoPayload): JobPlan => {
 
   return {
     steps: [step],
+    cleanupSteps: [],
+    outputSoCandidates: [],
     preview: renderCommand(step.cmd, step.args, step.cwd),
     validationErrors: errors,
     warnings,
@@ -385,6 +478,8 @@ export const buildAndroidSoJobPlan = (jobType: AndroidSoJobType, payload: Androi
   }
   return {
     steps: [],
+    cleanupSteps: [],
+    outputSoCandidates: [],
     preview: '',
     validationErrors: [`Unsupported jobType: ${jobType}`],
     warnings: [],

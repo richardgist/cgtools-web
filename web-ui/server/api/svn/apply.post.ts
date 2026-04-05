@@ -11,38 +11,169 @@ interface PatchResult {
     applied: string[]
     conflicts: string[]
     skipped: string[]
+    files: PatchFileDetail[]
+    summary: {
+        textConflicts: number
+        rejectedHunks: number
+    }
+}
+
+interface PatchFileDetail {
+    path: string
+    status: 'applied' | 'conflict'
+    hunks: PatchHunkDetail[]
+    rawLines: string[]
+}
+
+interface PatchHunkDetail {
+    type: 'applied' | 'rejected'
+    oldStart: number
+    oldLines: number
+    newStart: number
+    newLines: number
+    offset: number | null
+    fuzz: number | null
+    raw: string
+}
+
+function normalizeSvnOutput(output: string): string {
+    return output
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
 }
 
 function parseSvnPatchOutput(stdout: string): PatchResult {
     const applied: string[] = []
     const conflicts: string[] = []
     const skipped: string[] = []
+    const files: PatchFileDetail[] = []
+    let currentFile: PatchFileDetail | null = null
+    let textConflicts = 0
 
-    for (const line of stdout.split('\n')) {
-        const trimmed = line.trimEnd()
+    const normalized = normalizeSvnOutput(stdout)
+
+    for (const rawLine of normalized.split('\n')) {
+        const trimmed = rawLine.trim()
         if (!trimmed) continue
 
-        // U/G/A/D + two spaces + path = successfully applied
-        if (/^[UGAD]\s{2}/.test(trimmed)) {
-            applied.push(trimmed.substring(3).trim())
-        }
-        // C + two spaces = conflict at file level
-        else if (/^C\s{2}/.test(trimmed)) {
-            conflicts.push(trimmed.substring(3).trim())
-        }
-        // >         rejected hunk ...
-        else if (/^>.*rejected/i.test(trimmed)) {
-            if (conflicts.length === 0 || !conflicts.includes('(hunk)')) {
-                conflicts.push(trimmed.trim())
+        const fileMatch = trimmed.match(/^([UGADC])\s{1,4}(.+)$/)
+        if (fileMatch) {
+            const status = fileMatch[1]
+            const filePath = fileMatch[2].trim()
+            currentFile = {
+                path: filePath,
+                status: status === 'C' ? 'conflict' : 'applied',
+                hunks: [],
+                rawLines: [trimmed]
             }
+            files.push(currentFile)
+
+            if (status === 'C') {
+                conflicts.push(filePath)
+            } else {
+                applied.push(filePath)
+            }
+            continue
         }
-        // Skipped missing target
-        else if (/^Skipped/i.test(trimmed)) {
+
+        if (/^>\s*/.test(trimmed)) {
+            if (currentFile) {
+                currentFile.rawLines.push(trimmed)
+            }
+
+            const hunkMatch = trimmed.match(/^>\s*(applied|rejected)\s+hunk\s+@@\s*-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s*@@/i)
+            if (!hunkMatch || !currentFile) {
+                continue
+            }
+
+            const type = hunkMatch[1].toLowerCase() as 'applied' | 'rejected'
+            const offsetMatch = trimmed.match(/\bwith offset\s+(-?\d+)/i)
+            const fuzzMatch = trimmed.match(/\band fuzz\s+(\d+)/i)
+
+            currentFile.hunks.push({
+                type,
+                oldStart: Number(hunkMatch[2]),
+                oldLines: Number(hunkMatch[3] || 1),
+                newStart: Number(hunkMatch[4]),
+                newLines: Number(hunkMatch[5] || 1),
+                offset: offsetMatch ? Number(offsetMatch[1]) : null,
+                fuzz: fuzzMatch ? Number(fuzzMatch[1]) : null,
+                raw: trimmed
+            })
+
+            if (type === 'rejected') {
+                currentFile.status = 'conflict'
+                if (!conflicts.includes(currentFile.path)) {
+                    conflicts.push(currentFile.path)
+                }
+
+                const appliedIndex = applied.indexOf(currentFile.path)
+                if (appliedIndex >= 0) {
+                    applied.splice(appliedIndex, 1)
+                }
+            }
+            continue
+        }
+
+        if (/^Skipped/i.test(trimmed)) {
             skipped.push(trimmed)
+            currentFile = null
+            continue
+        }
+
+        const textConflictMatch = trimmed.match(/^Text conflicts:\s*(\d+)/i)
+        if (textConflictMatch) {
+            textConflicts = Number(textConflictMatch[1])
         }
     }
 
-    return { applied, conflicts, skipped }
+    return {
+        applied,
+        conflicts,
+        skipped,
+        files,
+        summary: {
+            textConflicts,
+            rejectedHunks: files.reduce((total, file) => {
+                return total + file.hunks.filter((hunk) => hunk.type === 'rejected').length
+            }, 0)
+        }
+    }
+}
+
+function buildPatchResponse(stdout: string, stderr = '', fallbackMessage = 'svn patch 未能应用任何内容') {
+    const combinedOutput = [stdout, stderr].filter(Boolean).join('\n')
+    const normalizedMessage = normalizeSvnOutput(combinedOutput).trim()
+    const parsed = parseSvnPatchOutput(combinedOutput)
+
+    if (parsed.conflicts.length > 0) {
+        return {
+            success: parsed.applied.length > 0,
+            partial: true,
+            applied: parsed.applied,
+            conflicts: parsed.conflicts,
+            skipped: parsed.skipped,
+            files: parsed.files,
+            summary: parsed.summary,
+            message: normalizedMessage || fallbackMessage
+        }
+    }
+
+    if (parsed.files.length > 0 || parsed.skipped.length > 0) {
+        return {
+            success: true,
+            applied: parsed.applied,
+            skipped: parsed.skipped,
+            files: parsed.files,
+            summary: parsed.summary,
+            message: normalizedMessage || fallbackMessage
+        }
+    }
+
+    return {
+        success: false,
+        message: normalizedMessage || fallbackMessage
+    }
 }
 
 export default defineEventHandler(async (event) => {
@@ -86,31 +217,23 @@ export default defineEventHandler(async (event) => {
         // Clean up temp file
         try { fs.unlinkSync(patchFilePath) } catch (e) { }
 
-        const parsed = parseSvnPatchOutput(stdout || '')
-
-        if (parsed.applied.length > 0 && parsed.conflicts.length === 0) {
-            return {
-                success: true,
-                message: stdout.trim()
-            }
-        } else if (parsed.applied.length > 0 && parsed.conflicts.length > 0) {
-            return {
-                success: true,
-                partial: true,
-                conflicts: parsed.conflicts,
-                message: stdout.trim()
-            }
-        } else {
-            return {
-                success: false,
-                message: stdout.trim() || stderr?.trim() || 'svn patch 未能应用任何内容'
-            }
-        }
+        return buildPatchResponse(stdout || '', stderr || '')
     } catch (error: any) {
         try {
             if (fs.existsSync(patchFilePath)) fs.unlinkSync(patchFilePath)
         } catch (e) { }
 
-        return { success: false, message: error.message || error.stderr || 'Failed to apply patch' }
+        const stdout = error.stdout || ''
+        const stderr = error.stderr || ''
+        const parsed = parseSvnPatchOutput([stdout, stderr].filter(Boolean).join('\n'))
+
+        if (parsed.files.length > 0 || parsed.conflicts.length > 0 || parsed.skipped.length > 0) {
+            return buildPatchResponse(stdout, stderr, error.message || 'svn patch 执行出现冲突')
+        }
+
+        return {
+            success: false,
+            message: normalizeSvnOutput(stderr || stdout || error.message || 'Failed to apply patch').trim()
+        }
     }
 })

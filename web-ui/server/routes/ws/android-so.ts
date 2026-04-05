@@ -207,12 +207,12 @@ export default defineWebSocketHandler({
       }
 
       let bkDistToggleState: BkDistToggleState | null = null
+      let exitCode = 0
       try {
         if (jobType === 'buildSo') {
           bkDistToggleState = tryDisableBkDist(typedPeer, payload as BuildSoPayload)
         }
 
-        let exitCode = 0
         for (const step of plan.steps) {
           if (runState.terminating) {
             exitCode = -1
@@ -232,62 +232,79 @@ export default defineWebSocketHandler({
             break
           }
         }
-
-        if (exitCode === 0 && jobType === 'buildSo') {
-          const soPath = plan.outputs.soPath
-          if (!soPath || !fs.existsSync(soPath)) {
-            send(typedPeer, {
-              type: 'error',
-              data: `Build succeeded but expected SO not found: ${soPath}`,
-            })
-            finishRun(typedPeer, runState, 1)
-            return
-          }
-        }
-
-        if (exitCode === 0 && jobType === 'replaceA') {
-          const outputApk = plan.outputs.outputApk
-          if (!outputApk || !fs.existsSync(outputApk)) {
-            send(typedPeer, {
-              type: 'error',
-              data: `replaceSo finished but output APK not found: ${outputApk}`,
-            })
-            finishRun(typedPeer, runState, 1)
-            return
-          }
-        }
-
-        if (exitCode === 0 && jobType === 'injectB') {
-          const localLogPath = plan.outputs.localLogPath
-          const marker = plan.outputs.expectedMarker
-          if (!localLogPath || !fs.existsSync(localLogPath)) {
-            send(typedPeer, {
-              type: 'error',
-              data: `Injection log pull failed: ${localLogPath}`,
-            })
-            finishRun(typedPeer, runState, 1)
-            return
-          }
-
-          const logText = fs.readFileSync(localLogPath, 'utf-8')
-          if (!marker || !logText.includes(marker)) {
-            send(typedPeer, {
-              type: 'error',
-              data: `Injection marker not found in log: ${marker}`,
-            })
+      } finally {
+        for (const cleanupStep of plan.cleanupSteps || []) {
+          send(typedPeer, { type: 'step', name: cleanupStep.name })
+          const cleanupResult = await runStep(typedPeer, runState, cleanupStep)
+          if (cleanupResult.code !== 0) {
             send(typedPeer, {
               type: 'stderr',
-              data: `[inject-log] ${localLogPath}\n${logText}\n`,
+              data: `[cleanup error] ${cleanupStep.name} failed with exitCode=${cleanupResult.code}\n`,
             })
-            finishRun(typedPeer, runState, 1, plan.outputs)
-            return
+            if (exitCode === 0) {
+              exitCode = cleanupResult.code
+            }
           }
         }
-
-        finishRun(typedPeer, runState, exitCode, plan.outputs)
-      } finally {
         tryRestoreBkDist(typedPeer, bkDistToggleState)
       }
+
+      if (exitCode === 0 && jobType === 'buildSo') {
+        const soCandidates = (plan.outputSoCandidates && plan.outputSoCandidates.length > 0)
+          ? plan.outputSoCandidates
+          : [plan.outputs.soPath]
+        const soPath = soCandidates.find((candidate) => candidate && fs.existsSync(candidate))
+        if (!soPath || !fs.existsSync(soPath)) {
+          send(typedPeer, {
+            type: 'error',
+            data: `Build succeeded but expected SO not found. Checked:\n${soCandidates.join('\n')}`,
+          })
+          finishRun(typedPeer, runState, 1)
+          return
+        }
+        plan.outputs.soPath = soPath
+      }
+
+      if (exitCode === 0 && jobType === 'replaceA') {
+        const outputApk = plan.outputs.outputApk
+        if (!outputApk || !fs.existsSync(outputApk)) {
+          send(typedPeer, {
+            type: 'error',
+            data: `replaceSo finished but output APK not found: ${outputApk}`,
+          })
+          finishRun(typedPeer, runState, 1)
+          return
+        }
+      }
+
+      if (exitCode === 0 && jobType === 'injectB') {
+        const localLogPath = plan.outputs.localLogPath
+        const marker = plan.outputs.expectedMarker
+        if (!localLogPath || !fs.existsSync(localLogPath)) {
+          send(typedPeer, {
+            type: 'error',
+            data: `Injection log pull failed: ${localLogPath}`,
+          })
+          finishRun(typedPeer, runState, 1)
+          return
+        }
+
+        const logText = fs.readFileSync(localLogPath, 'utf-8')
+        if (!marker || !logText.includes(marker)) {
+          send(typedPeer, {
+            type: 'error',
+            data: `Injection marker not found in log: ${marker}`,
+          })
+          send(typedPeer, {
+            type: 'stderr',
+            data: `[inject-log] ${localLogPath}\n${logText}\n`,
+          })
+          finishRun(typedPeer, runState, 1, plan.outputs)
+          return
+        }
+      }
+
+      finishRun(typedPeer, runState, exitCode, plan.outputs)
     } catch (error: any) {
       runState.process = null
       runState.running = false

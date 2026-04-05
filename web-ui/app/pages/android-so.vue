@@ -72,6 +72,21 @@
         <div class="card-header">Current Step Settings</div>
         <div class="card-body">
           <div v-if="activeTab === 'buildSo'" class="field-grid">
+            <div class="build-reminder-card">
+              <div class="build-reminder-header">
+                <div>
+                  <div class="build-reminder-step">Step 0</div>
+                  <div class="build-reminder-title">Check DefaultEngine.ini Before Build</div>
+                </div>
+                <button class="fluent-btn sub" @click="copyArm64IniSnippet">Copy Arm64 Snippet</button>
+              </div>
+              <div class="build-reminder-text">
+                Update <code>{{ defaultEngineIniPath }}</code> before building. For your usual workflow, keep Android ABI on arm64 only.
+              </div>
+              <pre class="build-reminder-code">[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]
+bBuildForArmV7=False
+bBuildForArm64=True</pre>
+            </div>
             <div class="field-row compact">
               <label>Config</label>
               <select v-model="settings.config" class="fluent-select">
@@ -154,8 +169,8 @@
               <button class="fluent-btn sub" @click="pickFile('soPath', 'so')">Browse</button>
             </div>
             <div class="field-row">
-              <label>Remote Path (dir or .so file)</label>
-              <input v-model="settings.pushRemotePath" class="fluent-input path-input" placeholder="/data/local/tmp/" />
+              <label>Remote Path (direct adb mode only)</label>
+              <input v-model="settings.pushRemotePath" class="fluent-input path-input" placeholder="/data/local/tmp/" :disabled="settings.pushUseRunAs" />
             </div>
             <label class="check-line">
               <input v-model="settings.pushUseRunAs" type="checkbox" />
@@ -164,6 +179,12 @@
             <div class="field-row" v-if="settings.pushUseRunAs">
               <label>Package Name</label>
               <input v-model="settings.pushPackageName" class="fluent-input path-input" placeholder="com.tencent.tmgp.pubgmhd" />
+            </div>
+            <div v-if="settings.pushUseRunAs" class="hint-line">
+              Run-as mode always copies to <code>app_lib/libUE4.so</code> inside the package sandbox.
+            </div>
+            <div v-else class="hint-line warn">
+              Direct adb mode is enabled, so preview only shows one push step. Enable <code>Use run-as</code> to generate the phone-side copy and verify steps.
             </div>
             <div class="hint-line">SO will always be renamed to <code>libUE4.so</code> at target path.</div>
           </div>
@@ -196,12 +217,23 @@
       <section class="fluent-card">
         <div class="card-header">Command Preview</div>
         <div class="card-body">
-          <textarea class="preview-area" readonly :value="commandPreview"></textarea>
+          <div v-if="commandPreviewSteps.length" class="preview-steps">
+            <div v-for="(step, index) in commandPreviewSteps" :key="`${activeTab}-${index}-${step.name}`" class="preview-step-card">
+              <div class="preview-step-header">
+                <div>
+                  <div class="preview-step-index">Step {{ index + 1 }}</div>
+                  <div class="preview-step-name">{{ step.name }}</div>
+                </div>
+                <button class="fluent-btn sub" @click="copyPreviewStep(step)">Copy</button>
+              </div>
+              <pre class="preview-step-command">{{ step.display }}</pre>
+            </div>
+          </div>
+          <div v-else class="hint-line">No commands available for the current tab.</div>
           <div class="action-row">
-            <button class="fluent-btn" @click="copyPreview">Copy Command</button>
+            <button class="fluent-btn" @click="copyPreview">{{ activeTab === 'guideC' ? 'Copy APL Snippet' : 'Copy All Commands' }}</button>
             <button class="fluent-btn primary" @click="runActive" :disabled="isRunning || activeTab === 'guideC'">Run</button>
             <button class="fluent-btn danger" @click="terminateRun" :disabled="!isRunning">Stop</button>
-            <button class="fluent-btn" v-if="activeTab === 'guideC'" @click="copyAplTemplate">Copy APL Snippet</button>
           </div>
           <div v-if="lastOutputs" class="outputs-box">
             <div class="guide-title">Latest Outputs</div>
@@ -312,10 +344,24 @@ const resolveProjectDir = (projectFile, projectRoot) => {
   return normalizeProjectRoot(projectRoot)
 }
 
-const buildDefaultSoPath = (projectFile, arch, projectRoot) => {
+const getAndroidBinaryArchName = (arch) => {
+  if (arch === 'arm64-v8a') return 'arm64'
+  if (arch === 'armeabi-v7a') return 'armv7'
+  return 'x64'
+}
+
+const buildLegacyDefaultSoPath = (projectFile, arch, projectRoot) => {
   const projectDir = resolveProjectDir(projectFile, projectRoot)
   if (!projectDir) return ''
   return `${projectDir}\\Intermediate\\Android\\APK\\jni\\${arch || 'arm64-v8a'}\\libUE4.so`
+}
+
+const buildDefaultSoPath = (projectFile, config, arch, projectRoot) => {
+  const projectDir = resolveProjectDir(projectFile, projectRoot)
+  if (!projectDir) return ''
+  const targetName = projectFile ? projectFile.replace(/^.*[\\/]/, '').replace(/\.uproject$/i, '') : 'ShadowTrackerExtra'
+  const archName = getAndroidBinaryArchName(arch || 'arm64-v8a')
+  return `${projectDir}\\Binaries\\Android\\${targetName}-Android-${config || 'Development'}-${archName}-es2.so`
 }
 
 const buildDefaultLogPath = (projectFile, config, arch, projectRoot) => {
@@ -333,7 +379,7 @@ const createDefaultSettings = (projectRoot = DEFAULT_PROJECT_ROOT) => {
     logPath: '',
     maxParallelActions: null,
     apkPath: '',
-    soPath: buildDefaultSoPath(sharedPaths.projectFile, 'arm64-v8a', sharedPaths.projectRoot),
+    soPath: buildDefaultSoPath(sharedPaths.projectFile, 'Development', 'arm64-v8a', sharedPaths.projectRoot),
     pushRemotePath: '/data/local/tmp/',
     pushUseRunAs: false,
     pushPackageName: 'com.tencent.tmgp.pubgmhd',
@@ -382,7 +428,11 @@ const sanitizeSettingsProfile = (profile, fallbackRoot = DEFAULT_PROJECT_ROOT) =
   }
 
   sanitized.projectRoot = resolvedProjectRoot
-  sanitized.soPath = sanitized.soPath || buildDefaultSoPath(deriveSharedPaths(resolvedProjectRoot).projectFile, sanitized.arch, sanitized.projectRoot)
+  const sharedPaths = deriveSharedPaths(resolvedProjectRoot)
+  const legacyDefaultSoPath = buildLegacyDefaultSoPath(sharedPaths.projectFile, sanitized.arch, sanitized.projectRoot)
+  if (!sanitized.soPath || sanitized.soPath === legacyDefaultSoPath) {
+    sanitized.soPath = buildDefaultSoPath(sharedPaths.projectFile, sanitized.config, sanitized.arch, sanitized.projectRoot)
+  }
 
   return sanitized
 }
@@ -466,13 +516,20 @@ const applySettingsProfile = (profile) => {
 
 const injectToolsReady = computed(() => detected.androidInjectDirExists && detected.injectDemoExists && detected.injectEntrySoExists)
 const sharedPaths = computed(() => deriveSharedPaths(settings.projectRoot))
+const defaultEngineIniPath = computed(() => joinWindowsPath(settings.projectRoot, 'Survive', 'Config', 'DefaultEngine.ini'))
 const defaultBuildLogPath = computed(() => buildDefaultLogPath(sharedPaths.value.projectFile, settings.config, settings.arch, settings.projectRoot))
-const defaultSoPath = computed(() => buildDefaultSoPath(sharedPaths.value.projectFile, settings.arch, settings.projectRoot))
+const defaultSoPath = computed(() => buildDefaultSoPath(sharedPaths.value.projectFile, settings.config, settings.arch, settings.projectRoot))
 
 const quote = (text) => {
   if (!text) return '""'
   return /[\s"&|<>^]/.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text
 }
+
+const createPreviewStep = (name, command, cwd) => ({
+  name,
+  command,
+  display: cwd ? `(cwd=${cwd}) ${command}` : command,
+})
 
 const archToUbtArg = (arch) => {
   if (arch === 'arm64-v8a') return '-arm64'
@@ -487,7 +544,11 @@ const aplSnippet = computed(() => {
   return `<soLoadLibrary>\n  <loadLibrary name="${settings.aplLibraryName}" failmsg="${settings.aplFailMessage}" />\n</soLoadLibrary>`
 })
 
-const commandPreview = computed(() => {
+const arm64IniSnippet = `[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]
+bBuildForArmV7=False
+bBuildForArm64=True`
+
+const commandPreviewSteps = computed(() => {
   if (activeTab.value === 'buildSo') {
     const projectFile = sharedPaths.value.projectFile
     const engineRoot = sharedPaths.value.engineRoot
@@ -498,23 +559,48 @@ const commandPreview = computed(() => {
     const archArg = archToUbtArg(settings.arch)
     const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultBuildLogPath.value
     const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
+    const replaceManagerDir = 'I:\\cgtools\\ReplaceManager\\RevertTool'
+    const replaceManagerScript = `${replaceManagerDir}\\Replace.bat`
+    const replaceManagerCleanScript = `${replaceManagerDir}\\Clean.bat`
+    const baseCommand = `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} ${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge`
+    const replaceCommand = `${quote(replaceManagerScript)}`
+    const manifestCommand = `${baseCommand} -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
+    const buildCommand = `${baseCommand}${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
+    const cleanCommand = `${quote(replaceManagerCleanScript)}`
 
-    return `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
+    return [
+      createPreviewStep('Prepare ReplaceManager patch', replaceCommand, replaceManagerDir),
+      createPreviewStep('Generate UBT manifest', manifestCommand, settings.projectRoot),
+      createPreviewStep('Build Android SO with UBT', buildCommand, settings.projectRoot),
+      createPreviewStep('Restore ReplaceManager state', cleanCommand, replaceManagerDir),
+    ]
   }
   if (activeTab.value === 'replaceA') {
-    return `${quote(sharedPaths.value.ueAppToolsExe)} -mode=replaceSo -platform=android -apkPath=${quote(settings.apkPath)} -soPath=${quote(settings.soPath)} -arch=${settings.arch}`
+    return [
+      createPreviewStep(
+        'Replace SO in APK',
+        `${quote(sharedPaths.value.ueAppToolsExe)} -mode=replaceSo -platform=android -apkPath=${quote(settings.apkPath)} -soPath=${quote(settings.soPath)} -arch=${settings.arch}`,
+      ),
+    ]
   }
   if (activeTab.value === 'injectB') {
     const comp = settings.launchActivity.includes('/') ? settings.launchActivity : `${settings.packageName}/${settings.launchActivity}`
     return [
-      `adb push ${quote(sharedPaths.value.androidInjectDir + '\\inject_demo')} /data/local/tmp/`,
-      `adb push ${quote(sharedPaths.value.androidInjectDir + '\\lib_inject_entry.so')} /data/local/tmp/`,
-      `adb push ${quote(settings.soPath)} /data/local/tmp/libUE4.so`,
-      `adb shell "run-as ${settings.packageName} sh -c 'cp /data/local/tmp/libUE4.so . && cp /data/local/tmp/inject_demo . && cp /data/local/tmp/lib_inject_entry.so . && chmod 777 ./inject_demo && chmod 777 ./lib_inject_entry.so'"`,
-      `adb shell am start -n ${comp}`,
-      `adb shell "run-as ${settings.packageName} sh -c './inject_demo ${settings.packageName} > /data/local/tmp/log_android_inject.txt'"`,
-      'adb pull /data/local/tmp/log_android_inject.txt <local_path>',
-    ].join('\n')
+      createPreviewStep('Push inject_demo', `adb push ${quote(sharedPaths.value.androidInjectDir + '\\inject_demo')} /data/local/tmp/`),
+      createPreviewStep('Push lib_inject_entry.so', `adb push ${quote(sharedPaths.value.androidInjectDir + '\\lib_inject_entry.so')} /data/local/tmp/`),
+      createPreviewStep('Push target libUE4.so', `adb push ${quote(settings.soPath)} /data/local/tmp/libUE4.so`),
+      createPreviewStep('Prepare log file', 'adb shell touch /data/local/tmp/log_android_inject.txt'),
+      createPreviewStep(
+        'Copy runtime files into app sandbox',
+        `adb shell "run-as ${settings.packageName} sh -c 'cp /data/local/tmp/libUE4.so . && cp /data/local/tmp/inject_demo . && cp /data/local/tmp/lib_inject_entry.so . && chmod 777 ./inject_demo && chmod 777 ./lib_inject_entry.so'"`,
+      ),
+      createPreviewStep('Launch game activity', `adb shell am start -n ${comp}`),
+      createPreviewStep(
+        'Execute injector',
+        `adb shell "run-as ${settings.packageName} sh -c './inject_demo ${settings.packageName} > /data/local/tmp/log_android_inject.txt'"`,
+      ),
+      createPreviewStep('Pull injector log', 'adb pull /data/local/tmp/log_android_inject.txt <local_path>'),
+    ]
   }
   if (activeTab.value === 'pushSo') {
     const remotePath = settings.pushRemotePath?.trim() || '/data/local/tmp/'
@@ -524,16 +610,23 @@ const commandPreview = computed(() => {
       : (normalized.toLowerCase().endsWith('.so') ? `${normalized.replace(/\/[^/]*$/, '')}/libUE4.so` : `${normalized}/libUE4.so`)
     if (settings.pushUseRunAs) {
       const packageName = settings.pushPackageName?.trim() || 'com.tencent.tmgp.pubgmhd'
-      const remoteDir = remoteFile.replace(/\/[^/]*$/, '')
       return [
-        `adb push ${quote(settings.soPath)} /data/local/tmp/libUE4.so`,
-        `adb shell "run-as ${packageName} sh -c 'mkdir -p ${remoteDir} && cp /data/local/tmp/libUE4.so ${remoteFile} && ls -l ${remoteFile}'"`,
-      ].join('\n')
+        createPreviewStep('Push target libUE4.so to temp path', `adb push ${quote(settings.soPath)} /data/local/tmp/libUE4.so`),
+        createPreviewStep('Ensure app_lib exists', `adb shell run-as ${packageName} mkdir -p app_lib`),
+        createPreviewStep('Copy SO into app_lib', `adb shell run-as ${packageName} cp /data/local/tmp/libUE4.so app_lib/libUE4.so`),
+        createPreviewStep('Verify libUE4.so in app_lib', `adb shell run-as ${packageName} ls -l app_lib/libUE4.so`),
+      ]
     }
-    return `adb push ${quote(settings.soPath)} ${quote(remoteFile)}`
+    return [
+      createPreviewStep('Push SO via adb', `adb push ${quote(settings.soPath)} ${quote(remoteFile)}`),
+    ]
   }
-  return aplSnippet.value
+  return [
+    createPreviewStep('APL snippet', aplSnippet.value),
+  ]
 })
+
+const commandPreview = computed(() => commandPreviewSteps.value.map((step) => step.command).join('\n'))
 
 const saveCurrentProfile = () => {
   if (isApplyingSettings) return
@@ -574,12 +667,17 @@ const copyText = async (text) => {
 
 const copyPreview = async () => {
   await copyText(commandPreview.value)
-  appendLog('info', '[info] Command copied.\n')
+  appendLog('info', `[info] ${activeTab.value === 'guideC' ? 'APL snippet' : 'All commands'} copied.\n`)
 }
 
-const copyAplTemplate = async () => {
-  await copyText(aplSnippet.value)
-  appendLog('info', '[info] APL snippet copied.\n')
+const copyPreviewStep = async (step) => {
+  await copyText(step.command)
+  appendLog('info', `[info] Step copied: ${step.name}\n`)
+}
+
+const copyArm64IniSnippet = async () => {
+  await copyText(arm64IniSnippet)
+  appendLog('info', '[info] Arm64 DefaultEngine.ini snippet copied.\n')
 }
 
 const refreshProjectDetection = async (projectRoot) => {
@@ -785,13 +883,14 @@ const terminateRun = () => {
 }
 
 watch(
-  () => [sharedPaths.value.projectFile, settings.arch, settings.projectRoot],
-  ([projectFile, arch, projectRoot], previousValues) => {
-    const [previousProjectFile = projectFile, previousArch = arch, previousProjectRoot = projectRoot] = previousValues || []
-    const previousDefaultSoPath = buildDefaultSoPath(previousProjectFile, previousArch, previousProjectRoot)
+  () => [sharedPaths.value.projectFile, settings.config, settings.arch, settings.projectRoot],
+  ([projectFile, config, arch, projectRoot], previousValues) => {
+    const [previousProjectFile = projectFile, previousConfig = config, previousArch = arch, previousProjectRoot = projectRoot] = previousValues || []
+    const previousDefaultSoPath = buildDefaultSoPath(previousProjectFile, previousConfig, previousArch, previousProjectRoot)
+    const previousLegacyDefaultSoPath = buildLegacyDefaultSoPath(previousProjectFile, previousArch, previousProjectRoot)
 
-    if (!settings.soPath || settings.soPath === previousDefaultSoPath) {
-      settings.soPath = buildDefaultSoPath(projectFile, arch, projectRoot)
+    if (!settings.soPath || settings.soPath === previousDefaultSoPath || settings.soPath === previousLegacyDefaultSoPath) {
+      settings.soPath = buildDefaultSoPath(projectFile, config, arch, projectRoot)
     }
   },
 )
@@ -881,6 +980,52 @@ onMounted(async () => {
   color: #ffca7a;
 }
 
+.build-reminder-card {
+  border: 1px solid rgba(255, 202, 122, 0.45);
+  border-radius: 8px;
+  background: rgba(255, 202, 122, 0.08);
+  padding: 12px;
+}
+
+.build-reminder-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.build-reminder-step {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ffca7a;
+}
+
+.build-reminder-title {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffe0ad;
+}
+
+.build-reminder-text {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #ffe8c2;
+}
+
+.build-reminder-code {
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 202, 122, 0.25);
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff3de;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 .check-line {
   display: flex;
   gap: 8px;
@@ -888,17 +1033,51 @@ onMounted(async () => {
   color: var(--text-secondary);
 }
 
-.preview-area {
-  width: 100%;
-  min-height: 120px;
+.preview-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preview-step-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px;
+}
+
+.preview-step-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.preview-step-index {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.preview-step-name {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.preview-step-command {
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 6px;
   background: #121212;
   color: #d9d9d9;
   border: 1px solid var(--control-stroke);
-  border-radius: 6px;
-  padding: 10px;
   font-family: 'JetBrains Mono', 'Consolas', monospace;
   font-size: 12px;
-  resize: vertical;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .action-row {

@@ -10,6 +10,22 @@
         <div class="fluent-card svn-card-left">
           <div class="card-header">路径与设置</div>
           <div class="card-body form-stack">
+            <div class="svn-profile-switch" role="tablist" aria-label="SVN 路径配置">
+              <button
+                v-for="profile in profileOptions"
+                :key="profile.value"
+                class="svn-profile-chip"
+                :class="{ active: activeProfile === profile.value }"
+                type="button"
+                @click="switchProfile(profile.value)"
+              >
+                {{ profile.label }}
+              </button>
+            </div>
+            <div class="svn-profile-hint">
+              当前为 <strong>{{ activeProfileLabel }}</strong> 配置，路径与“包含上级目录”独立保存
+            </div>
+
             <div class="input-group">
               <label>路径 A (源/基准)</label>
               <div style="display: flex; gap: 8px;">
@@ -116,6 +132,61 @@
         </div>
       </div>
 
+      <div class="fluent-card margin-top-lg" v-if="patchApplySummary">
+        <div class="card-header">Patch 应用结果</div>
+        <div class="card-body patch-result-body">
+          <div class="patch-result-banner" :class="patchApplySummary.status">
+            <div class="patch-result-title">{{ patchApplySummary.headline }}</div>
+            <div class="patch-result-detail">{{ patchApplySummary.detail }}</div>
+          </div>
+
+          <div class="patch-result-metrics">
+            <div class="patch-metric-card">
+              <span class="patch-metric-label">已应用文件</span>
+              <strong class="patch-metric-value">{{ patchApplySummary.appliedFileCount }}</strong>
+            </div>
+            <div class="patch-metric-card warning" v-if="patchApplySummary.conflictFileCount">
+              <span class="patch-metric-label">冲突文件</span>
+              <strong class="patch-metric-value">{{ patchApplySummary.conflictFileCount }}</strong>
+            </div>
+            <div class="patch-metric-card warning" v-if="patchApplySummary.rejectedHunkCount">
+              <span class="patch-metric-label">Rejected Hunk</span>
+              <strong class="patch-metric-value">{{ patchApplySummary.rejectedHunkCount }}</strong>
+            </div>
+            <div class="patch-metric-card" v-if="patchApplySummary.skippedCount">
+              <span class="patch-metric-label">跳过项</span>
+              <strong class="patch-metric-value">{{ patchApplySummary.skippedCount }}</strong>
+            </div>
+          </div>
+
+          <div v-if="patchApplySummary.conflictFiles.length" class="patch-conflict-list">
+            <div v-for="file in patchApplySummary.conflictFiles" :key="file.path" class="patch-conflict-item">
+              <div class="patch-conflict-header">
+                <div class="patch-conflict-path" :title="file.path">{{ file.path }}</div>
+                <div class="patch-conflict-stats">
+                  <span class="patch-conflict-pill reject">{{ file.rejectedCount }} rejected</span>
+                  <span class="patch-conflict-pill" v-if="file.appliedCount">{{ file.appliedCount }} applied</span>
+                </div>
+              </div>
+
+              <div v-if="file.rejectedHunks.length" class="patch-hunk-list">
+                <div v-for="(hunk, index) in file.rejectedHunks" :key="`${file.path}-${index}`" class="patch-hunk-item reject">
+                  <span class="patch-hunk-badge">rejected</span>
+                  <code class="patch-hunk-range">{{ formatPatchHunkRange(hunk) }}</code>
+                  <span v-if="hunk.offset !== null" class="patch-hunk-meta">offset {{ hunk.offset }}</span>
+                  <span v-if="hunk.fuzz !== null" class="patch-hunk-meta">fuzz {{ hunk.fuzz }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <details class="patch-raw-output" v-if="patchApplySummary.rawOutput">
+            <summary>查看原始 SVN 输出</summary>
+            <pre>{{ patchApplySummary.rawOutput }}</pre>
+          </details>
+        </div>
+      </div>
+
       <!-- Apply History -->
       <div class="fluent-card margin-top-lg" v-if="applyHistory.length">
         <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
@@ -204,12 +275,20 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 
 const pathA = ref('')
 const pathB = ref('')
 const revision = ref('')
 const useParent = ref(false)
+const activeProfile = ref('client')
+
+const SETTINGS_KEY = 'cgtools_svn_settings_v2'
+const LEGACY_SETTINGS_KEY = 'cgtools_svn_settings'
+const profileOptions = [
+  { value: 'client', label: 'Client' },
+  { value: 'engine', label: 'Engine' }
+]
 
 const patchContent = ref('')
 const isGenerating = ref(false)
@@ -219,6 +298,7 @@ const logs = ref([])
 const logContainer = ref(null)
 const showApplyConfirm = ref(false)
 const showMergeConfirm = ref(false)
+const patchApplyResult = ref(null)
 
 const toast = ref({ show: false, msg: '', type: 'info' })
 let toastTimer = null
@@ -262,32 +342,207 @@ function shortenPath(p) {
   return parts.length > 2 ? '...' + '/' + parts.slice(-2).join('/') : p
 }
 
+function buildPatchApplySummary(result) {
+  if (!result) return null
+
+  const files = Array.isArray(result.files) ? result.files : []
+  const appliedFileCount = Array.isArray(result.applied) && result.applied.length
+    ? result.applied.length
+    : files.filter(file => file.status === 'applied').length
+
+  const conflictFiles = files
+    .filter(file => file.status === 'conflict')
+    .map(file => {
+      const hunks = Array.isArray(file.hunks) ? file.hunks : []
+      const rejectedHunks = hunks.filter(hunk => hunk.type === 'rejected')
+      const appliedHunks = hunks.filter(hunk => hunk.type === 'applied')
+      return {
+        ...file,
+        rejectedHunks,
+        rejectedCount: rejectedHunks.length,
+        appliedCount: appliedHunks.length
+      }
+    })
+
+  const conflictFileCount = Array.isArray(result.conflicts) && result.conflicts.length
+    ? result.conflicts.length
+    : conflictFiles.length
+
+  const skippedCount = Array.isArray(result.skipped) ? result.skipped.length : 0
+  const rejectedHunkCount = typeof result.summary?.rejectedHunks === 'number'
+    ? result.summary.rejectedHunks
+    : conflictFiles.reduce((total, file) => total + file.rejectedCount, 0)
+  const textConflicts = typeof result.summary?.textConflicts === 'number' && result.summary.textConflicts > 0
+    ? result.summary.textConflicts
+    : conflictFileCount
+
+  let status = 'error'
+  let headline = 'Patch 应用失败'
+  if (conflictFileCount > 0 && appliedFileCount > 0) {
+    status = 'warning'
+    headline = 'Patch 部分应用成功'
+  } else if (conflictFileCount > 0) {
+    status = 'warning'
+    headline = 'Patch 应用未完成'
+  } else if (result.success) {
+    status = 'success'
+    headline = 'Patch 应用成功'
+  }
+
+  const detailParts = []
+  if (appliedFileCount > 0) detailParts.push(`${appliedFileCount} 个文件已更新`)
+  if (conflictFileCount > 0) detailParts.push(`${conflictFileCount} 个冲突文件`)
+  if (rejectedHunkCount > 0) detailParts.push(`${rejectedHunkCount} 个 rejected hunk`)
+  if (textConflicts > 0 && conflictFileCount > 0) detailParts.push(`SVN 汇总 ${textConflicts} 个 text conflict`)
+  if (skippedCount > 0) detailParts.push(`${skippedCount} 个跳过项`)
+
+  return {
+    status,
+    headline,
+    detail: detailParts.join('，') || '没有可展示的结构化结果',
+    appliedFileCount,
+    conflictFileCount,
+    rejectedHunkCount,
+    textConflicts,
+    skippedCount,
+    conflictFiles,
+    rawOutput: result.message || ''
+  }
+}
+
+function buildPatchApplyLogMessage(summary) {
+  if (!summary) return 'Patch 应用完成'
+  if (summary.conflictFileCount > 0 && summary.appliedFileCount > 0) {
+    return `⚠️ Patch 部分应用成功：${summary.appliedFileCount} 个文件已更新，${summary.conflictFileCount} 个文件冲突，${summary.rejectedHunkCount} 个 hunk 被拒绝。详见下方“Patch 应用结果”。`
+  }
+  if (summary.conflictFileCount > 0) {
+    return `⚠️ Patch 应用未完成：${summary.conflictFileCount} 个文件冲突，${summary.rejectedHunkCount} 个 hunk 被拒绝。详见下方“Patch 应用结果”。`
+  }
+  return `✅ Patch 应用成功，${summary.appliedFileCount} 个文件已更新。`
+}
+
+function buildPatchApplyToast(summary) {
+  if (!summary) return 'Patch 应用完成'
+  if (summary.conflictFileCount > 0 && summary.appliedFileCount > 0) {
+    return `⚠️ Patch 部分成功，${summary.conflictFileCount} 个文件冲突`
+  }
+  if (summary.conflictFileCount > 0) {
+    return `⚠️ Patch 产生 ${summary.conflictFileCount} 个冲突文件`
+  }
+  return '✅ Patch 应用成功!'
+}
+
+function formatPatchHunkRange(hunk) {
+  if (!hunk) return ''
+  return `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`
+}
+
+const patchApplySummary = computed(() => buildPatchApplySummary(patchApplyResult.value))
+
 const isWorking = computed(() => isGenerating.value || isApplying.value || isMerging.value)
+const activeProfileLabel = computed(() => {
+  return profileOptions.find(profile => profile.value === activeProfile.value)?.label || 'Client'
+})
+
+function createEmptyProfileSettings() {
+  return {
+    pathA: '',
+    pathB: '',
+    useParent: false
+  }
+}
+
+function sanitizeProfileSettings(input = {}) {
+  return {
+    pathA: typeof input.pathA === 'string' ? input.pathA : '',
+    pathB: typeof input.pathB === 'string' ? input.pathB : '',
+    useParent: Boolean(input.useParent)
+  }
+}
+
+const settingsStore = reactive({
+  activeProfile: 'client',
+  profiles: {
+    client: createEmptyProfileSettings(),
+    engine: createEmptyProfileSettings()
+  }
+})
+
+function syncFormToProfile(profile = activeProfile.value) {
+  if (!settingsStore.profiles[profile]) return
+  Object.assign(settingsStore.profiles[profile], {
+    pathA: pathA.value,
+    pathB: pathB.value,
+    useParent: useParent.value
+  })
+}
+
+function applyProfileToForm(profile = activeProfile.value) {
+  const settings = sanitizeProfileSettings(settingsStore.profiles[profile] || {})
+  pathA.value = settings.pathA
+  pathB.value = settings.pathB
+  useParent.value = settings.useParent
+}
+
+function persistSettings() {
+  syncFormToProfile(activeProfile.value)
+  settingsStore.activeProfile = activeProfile.value
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+    activeProfile: settingsStore.activeProfile,
+    profiles: {
+      client: sanitizeProfileSettings(settingsStore.profiles.client),
+      engine: sanitizeProfileSettings(settingsStore.profiles.engine)
+    }
+  }))
+}
+
+function loadSettingsStore() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      Object.assign(settingsStore.profiles.client, sanitizeProfileSettings(parsed?.profiles?.client))
+      Object.assign(settingsStore.profiles.engine, sanitizeProfileSettings(parsed?.profiles?.engine))
+      settingsStore.activeProfile = parsed?.activeProfile === 'engine' ? 'engine' : 'client'
+      return
+    }
+  } catch (e) {}
+
+  try {
+    const raw = localStorage.getItem(LEGACY_SETTINGS_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    Object.assign(settingsStore.profiles.client, sanitizeProfileSettings(parsed))
+  } catch (e) {}
+}
 
 import { onMounted, watch } from 'vue'
 
 // Load settings from localStorage
 onMounted(() => {
-  const savedSettings = localStorage.getItem('cgtools_svn_settings')
-  if (savedSettings) {
-    try {
-      const parsed = JSON.parse(savedSettings)
-      pathA.value = parsed.pathA || ''
-      pathB.value = parsed.pathB || ''
-      useParent.value = parsed.useParent || false
-    } catch(e) {}
-  }
+  loadSettingsStore()
+  activeProfile.value = settingsStore.activeProfile
+  applyProfileToForm(activeProfile.value)
   loadHistory()
 })
 
 // Save settings when changed
 watch([pathA, pathB, useParent], () => {
-  localStorage.setItem('cgtools_svn_settings', JSON.stringify({
-    pathA: pathA.value,
-    pathB: pathB.value,
-    useParent: useParent.value
-  }))
+  persistSettings()
 })
+
+watch(activeProfile, (nextProfile, prevProfile) => {
+  if (prevProfile && prevProfile !== nextProfile) {
+    syncFormToProfile(prevProfile)
+  }
+  applyProfileToForm(nextProfile)
+  persistSettings()
+})
+
+function switchProfile(profile) {
+  if (profile === activeProfile.value) return
+  activeProfile.value = profile
+}
 
 async function selectFolder(target) {
   try {
@@ -385,6 +640,7 @@ async function viewLog() {
     return;
   }
 
+  patchApplyResult.value = null
   setStatus('获取日志...');
   svnLog(`获取 r${revision.value} 日志...`);
   isGenerating.value = true;
@@ -414,6 +670,7 @@ async function generatePatch() {
     return;
   }
 
+  patchApplyResult.value = null
   setStatus('生成 Patch...');
   svnLog(`生成 r${revision.value} Patch...`);
   isGenerating.value = true;
@@ -470,6 +727,7 @@ async function applyPatch() {
 async function doApply() {
   showApplyConfirm.value = false
 
+  patchApplyResult.value = null
   setStatus('应用 Patch...')
   svnLog('⏳ 正在应用 Patch，请稍候...')
   showToast('⏳ 正在应用 Patch...', 'info', 10000)
@@ -486,14 +744,17 @@ async function doApply() {
       }
     })
 
-    if (result.success && result.partial) {
-      const conflictCount = result.conflicts?.length || 0
-      svnLog(`⚠️ 部分应用成功，${conflictCount} 处冲突。请检查目标目录下的 .rej 文件手动解决。\n` + (result.message || ''), 'warning')
-      showToast(`⚠️ Patch 部分成功，${conflictCount} 处冲突，请检查 .rej 文件`, 'warning', 8000)
+    const summary = buildPatchApplySummary(result)
+
+    if (result.partial) {
+      patchApplyResult.value = result
+      svnLog(buildPatchApplyLogMessage(summary), 'warning')
+      showToast(buildPatchApplyToast(summary), 'warning', 8000)
       addHistory(revision.value, pathA.value, pathB.value, 'partial')
     } else if (result.success) {
-      svnLog('✅ 应用成功!\n' + (result.message || ''), 'info')
-      showToast('✅ Patch 应用成功!', 'success', 5000)
+      patchApplyResult.value = result
+      svnLog(buildPatchApplyLogMessage(summary), 'info')
+      showToast(buildPatchApplyToast(summary), 'success', 5000)
       addHistory(revision.value, pathA.value, pathB.value, 'success')
     } else {
       svnLog('❌ 应用失败: ' + (result.message || '未知错误'), 'stderr')
@@ -577,6 +838,225 @@ async function doMerge() {
 </script>
 
 <style scoped>
+.svn-profile-switch {
+  display: inline-flex;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.svn-profile-chip {
+  min-width: 88px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary, rgba(255,255,255,0.68));
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.svn-profile-chip.active {
+  background: rgba(59, 130, 246, 0.22);
+  color: #f8fafc;
+}
+
+.svn-profile-hint {
+  margin-top: -4px;
+  font-size: 12px;
+  color: var(--text-secondary, rgba(255,255,255,0.68));
+}
+
+.patch-result-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.patch-result-banner {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+}
+
+.patch-result-banner.success {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(20, 83, 45, 0.32);
+}
+
+.patch-result-banner.warning {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(120, 53, 15, 0.28);
+}
+
+.patch-result-banner.error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.28);
+}
+
+.patch-result-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f5f5f5;
+}
+
+.patch-result-detail {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255,255,255,0.78);
+}
+
+.patch-result-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.patch-metric-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.patch-metric-card.warning {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.patch-metric-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.patch-metric-value {
+  display: block;
+  margin-top: 6px;
+  font-size: 24px;
+  line-height: 1;
+  color: #f5f5f5;
+}
+
+.patch-conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.patch-conflict-item {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: rgba(255,255,255,0.02);
+}
+
+.patch-conflict-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.patch-conflict-path {
+  flex: 1;
+  font-family: 'Source Sans 3', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #f3f4f6;
+  word-break: break-all;
+}
+
+.patch-conflict-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.patch-conflict-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #d1d5db;
+  background: rgba(255,255,255,0.08);
+}
+
+.patch-conflict-pill.reject {
+  color: #fed7aa;
+  background: rgba(249, 115, 22, 0.18);
+}
+
+.patch-hunk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.patch-hunk-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.18);
+}
+
+.patch-hunk-item.reject {
+  border: 1px solid rgba(239, 68, 68, 0.18);
+}
+
+.patch-hunk-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fecaca;
+  background: rgba(220, 38, 38, 0.18);
+}
+
+.patch-hunk-range {
+  font-size: 12px;
+  color: #fef3c7;
+}
+
+.patch-hunk-meta {
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.patch-raw-output {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 12px;
+}
+
+.patch-raw-output summary {
+  cursor: pointer;
+  color: var(--text-secondary, #a0a0a0);
+  font-size: 12px;
+}
+
+.patch-raw-output pre {
+  margin: 12px 0 0;
+  padding: 12px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 10px;
+  background: #0d0d0d;
+  color: #d1d5db;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .diff-files-container {
   max-height: 600px;
   overflow-y: auto;

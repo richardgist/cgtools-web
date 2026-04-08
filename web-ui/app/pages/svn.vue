@@ -153,6 +153,14 @@
               <span class="patch-metric-label">Rejected Hunk</span>
               <strong class="patch-metric-value">{{ patchApplySummary.rejectedHunkCount }}</strong>
             </div>
+            <div class="patch-metric-card" v-if="patchApplySummary.formatOnlyRejectedHunkCount">
+              <span class="patch-metric-label">格式差异 Hunk</span>
+              <strong class="patch-metric-value">{{ patchApplySummary.formatOnlyRejectedHunkCount }}</strong>
+            </div>
+            <div class="patch-metric-card warning" v-if="patchApplySummary.semanticRejectedHunkCount">
+              <span class="patch-metric-label">业务改动 Hunk</span>
+              <strong class="patch-metric-value">{{ patchApplySummary.semanticRejectedHunkCount }}</strong>
+            </div>
             <div class="patch-metric-card" v-if="patchApplySummary.skippedCount">
               <span class="patch-metric-label">跳过项</span>
               <strong class="patch-metric-value">{{ patchApplySummary.skippedCount }}</strong>
@@ -165,6 +173,8 @@
                 <div class="patch-conflict-path" :title="file.path">{{ file.path }}</div>
                 <div class="patch-conflict-stats">
                   <span class="patch-conflict-pill reject">{{ file.rejectedCount }} rejected</span>
+                  <span class="patch-conflict-pill subtle" v-if="file.formatOnlyRejectedCount">{{ file.formatOnlyRejectedCount }} 格式差异</span>
+                  <span class="patch-conflict-pill semantic" v-if="file.semanticRejectedCount">{{ file.semanticRejectedCount }} 业务改动</span>
                   <span class="patch-conflict-pill" v-if="file.appliedCount">{{ file.appliedCount }} applied</span>
                 </div>
               </div>
@@ -173,8 +183,16 @@
                 <div v-for="(hunk, index) in file.rejectedHunks" :key="`${file.path}-${index}`" class="patch-hunk-item reject">
                   <span class="patch-hunk-badge">rejected</span>
                   <code class="patch-hunk-range">{{ formatPatchHunkRange(hunk) }}</code>
+                  <span
+                    v-if="hunk.classificationLabel"
+                    class="patch-hunk-type"
+                    :class="getPatchHunkTypeClass(hunk.classification)"
+                  >
+                    {{ hunk.classificationLabel }}
+                  </span>
                   <span v-if="hunk.offset !== null" class="patch-hunk-meta">offset {{ hunk.offset }}</span>
                   <span v-if="hunk.fuzz !== null" class="patch-hunk-meta">fuzz {{ hunk.fuzz }}</span>
+                  <div v-if="hunk.classificationHint" class="patch-hunk-hint">{{ hunk.classificationHint }}</div>
                 </div>
               </div>
             </div>
@@ -356,11 +374,15 @@ function buildPatchApplySummary(result) {
       const hunks = Array.isArray(file.hunks) ? file.hunks : []
       const rejectedHunks = hunks.filter(hunk => hunk.type === 'rejected')
       const appliedHunks = hunks.filter(hunk => hunk.type === 'applied')
+      const formatOnlyRejectedCount = rejectedHunks.filter(hunk => hunk.classification === 'format-only').length
+      const semanticRejectedCount = rejectedHunks.filter(hunk => hunk.classification === 'semantic').length
       return {
         ...file,
         rejectedHunks,
         rejectedCount: rejectedHunks.length,
-        appliedCount: appliedHunks.length
+        appliedCount: appliedHunks.length,
+        formatOnlyRejectedCount,
+        semanticRejectedCount
       }
     })
 
@@ -375,6 +397,12 @@ function buildPatchApplySummary(result) {
   const textConflicts = typeof result.summary?.textConflicts === 'number' && result.summary.textConflicts > 0
     ? result.summary.textConflicts
     : conflictFileCount
+  const formatOnlyRejectedHunkCount = typeof result.summary?.formatOnlyRejectedHunks === 'number'
+    ? result.summary.formatOnlyRejectedHunks
+    : conflictFiles.reduce((total, file) => total + file.formatOnlyRejectedCount, 0)
+  const semanticRejectedHunkCount = typeof result.summary?.semanticRejectedHunks === 'number'
+    ? result.summary.semanticRejectedHunks
+    : conflictFiles.reduce((total, file) => total + file.semanticRejectedCount, 0)
 
   let status = 'error'
   let headline = 'Patch 应用失败'
@@ -393,6 +421,8 @@ function buildPatchApplySummary(result) {
   if (appliedFileCount > 0) detailParts.push(`${appliedFileCount} 个文件已更新`)
   if (conflictFileCount > 0) detailParts.push(`${conflictFileCount} 个冲突文件`)
   if (rejectedHunkCount > 0) detailParts.push(`${rejectedHunkCount} 个 rejected hunk`)
+  if (formatOnlyRejectedHunkCount > 0) detailParts.push(`${formatOnlyRejectedHunkCount} 个格式差异 hunk`)
+  if (semanticRejectedHunkCount > 0) detailParts.push(`${semanticRejectedHunkCount} 个业务改动 hunk`)
   if (textConflicts > 0 && conflictFileCount > 0) detailParts.push(`SVN 汇总 ${textConflicts} 个 text conflict`)
   if (skippedCount > 0) detailParts.push(`${skippedCount} 个跳过项`)
 
@@ -403,6 +433,8 @@ function buildPatchApplySummary(result) {
     appliedFileCount,
     conflictFileCount,
     rejectedHunkCount,
+    formatOnlyRejectedHunkCount,
+    semanticRejectedHunkCount,
     textConflicts,
     skippedCount,
     conflictFiles,
@@ -435,6 +467,12 @@ function buildPatchApplyToast(summary) {
 function formatPatchHunkRange(hunk) {
   if (!hunk) return ''
   return `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`
+}
+
+function getPatchHunkTypeClass(classification) {
+  if (classification === 'format-only') return 'format'
+  if (classification === 'semantic') return 'semantic'
+  return 'unknown'
 }
 
 const patchApplySummary = computed(() => buildPatchApplySummary(patchApplyResult.value))
@@ -992,6 +1030,16 @@ async function doMerge() {
   background: rgba(249, 115, 22, 0.18);
 }
 
+.patch-conflict-pill.subtle {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.patch-conflict-pill.semantic {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.18);
+}
+
 .patch-hunk-list {
   display: flex;
   flex-direction: column;
@@ -1029,6 +1077,35 @@ async function doMerge() {
 
 .patch-hunk-meta {
   font-size: 12px;
+  color: #cbd5e1;
+}
+
+.patch-hunk-type {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.patch-hunk-type.format {
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.patch-hunk-type.semantic {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.2);
+}
+
+.patch-hunk-type.unknown {
+  color: #d1d5db;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.patch-hunk-hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.5;
   color: #cbd5e1;
 }
 

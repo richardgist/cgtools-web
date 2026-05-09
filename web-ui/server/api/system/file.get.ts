@@ -5,6 +5,7 @@ const FILTER_MAP: Record<string, string> = {
   apk: 'APK Files (*.apk)|*.apk|All Files (*.*)|*.*',
   so: 'SO Files (*.so)|*.so|All Files (*.*)|*.*',
   exe: 'Executable Files (*.exe)|*.exe|All Files (*.*)|*.*',
+  csv: 'CSV Files (*.csv)|*.csv|All Files (*.*)|*.*',
   any: 'All Files (*.*)|*.*',
 }
 
@@ -68,4 +69,3 @@ if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     })
   })
 })
-

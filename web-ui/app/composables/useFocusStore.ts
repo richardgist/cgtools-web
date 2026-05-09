@@ -1,5 +1,6 @@
 // 专注清单 - 核心状态管理（SQLite 后端）
 import { ref, computed, type Ref } from 'vue'
+import { buildDailyReport as buildDailyReportFromTasks, type DailyReport } from '~/utils/focusDailyReport'
 
 // ==================== Types ====================
 export interface FocusTask {
@@ -42,6 +43,11 @@ export interface PomodoroRecord {
     endTime: number
     duration: number // in seconds
     completed: boolean
+}
+
+export interface DailySnapshot extends DailyReport {
+    createdAt: number
+    updatedAt: number
 }
 
 export interface FocusSettings {
@@ -153,6 +159,7 @@ function createFocusStore() {
     ])
     const folders: Ref<FocusFolder[]> = ref([])
     const records: Ref<PomodoroRecord[]> = ref([])
+    const dailySnapshots: Ref<DailySnapshot[]> = ref([])
     const settings: Ref<FocusSettings> = ref({ ...DEFAULT_SETTINGS })
 
     // UI state
@@ -166,15 +173,17 @@ function createFocusStore() {
         if (_loaded) return
         _loaded = true
         try {
-            const [serverTasks, serverLists, serverRecords, serverSettings] = await Promise.all([
+            const [serverTasks, serverLists, serverRecords, serverSettings, serverDailySnapshots] = await Promise.all([
                 api<FocusTask[]>('/api/focus/tasks'),
                 api<FocusList[]>('/api/focus/lists'),
                 api<PomodoroRecord[]>('/api/focus/records'),
                 api<Partial<FocusSettings>>('/api/focus/settings'),
+                api<DailySnapshot[]>('/api/focus/daily-snapshots'),
             ])
             tasks.value = serverTasks
             if (serverLists.length > 0) lists.value = serverLists
             records.value = serverRecords
+            dailySnapshots.value = serverDailySnapshots
             settings.value = { ...DEFAULT_SETTINGS, ...serverSettings }
         } catch (e) {
             console.error('[FocusStore] Failed to load from server:', e)
@@ -430,6 +439,37 @@ function createFocusStore() {
         api('/api/focus/settings', { updates }).catch(e => console.error('[FocusStore] updateSettings sync error:', e))
     }
 
+    function buildDailyReport(date: string): DailyReport {
+        return buildDailyReportFromTasks(tasks.value, date)
+    }
+
+    function getSavedDailySnapshot(date: string) {
+        return dailySnapshots.value.find(snapshot => snapshot.date === date) ?? null
+    }
+
+    function getDailyReport(date: string) {
+        return getSavedDailySnapshot(date) ?? buildDailyReport(date)
+    }
+
+    function saveDailySnapshot(date: string) {
+        const report = buildDailyReport(date)
+        const existing = getSavedDailySnapshot(date)
+        const now = Date.now()
+        const snapshot: DailySnapshot = {
+            ...report,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now,
+        }
+        const idx = dailySnapshots.value.findIndex(item => item.date === date)
+        if (idx >= 0) {
+            dailySnapshots.value[idx] = snapshot
+        } else {
+            dailySnapshots.value.push(snapshot)
+        }
+        api('/api/focus/daily-snapshots', { snapshot }).catch(e => console.error('[FocusStore] saveDailySnapshot sync error:', e))
+        return snapshot
+    }
+
     // --- Report Data ---
     function getRecordsInRange(startTime: number, endTime: number) {
         return records.value.filter(r => r.startTime >= startTime && r.startTime < endTime)
@@ -503,7 +543,7 @@ function createFocusStore() {
 
     return {
         // State
-        tasks, lists, folders, records, settings,
+        tasks, lists, folders, records, dailySnapshots, settings,
         currentView, selectedTaskId, showCompletedTasks,
         // Computed
         selectedTask, currentListName, filteredTasks, completedTasks, completedTasksGrouped,
@@ -517,6 +557,7 @@ function createFocusStore() {
         addTask, updateTask, toggleTask, deleteTask, reorderTask,
         addList, updateList, deleteList,
         addFolder, addRecord, updateSettings,
+        buildDailyReport, getSavedDailySnapshot, getDailyReport, saveDailySnapshot,
         loadFromServer,
         // Report helpers
         getHeatmapData, getFocusRanking, getListDistribution, getRecordsInRange,

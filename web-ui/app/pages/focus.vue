@@ -39,8 +39,13 @@
 
       <!-- Header -->
       <div style="display:flex; align-items:center; justify-content:space-between; padding:0 24px 8px;">
-        <h2 style="font-size:18px; font-weight:700; margin:0;">{{ store.currentListName.value }}</h2>
+        <h2 style="font-size:18px; font-weight:700; margin:0;">{{ showDailyBoard ? '日期看板' : store.currentListName.value }}</h2>
         <div style="display:flex; gap:8px;">
+          <button class="focus-btn focus-btn--ghost" @click="showDailyBoard = !showDailyBoard" title="切换日期看板">
+            <svg v-if="!showDailyBoard" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+            {{ showDailyBoard ? '任务列表' : '日期看板' }}
+          </button>
           <button class="focus-btn focus-btn--ghost" @click="showStats = true" title="统计报表">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             报表
@@ -53,6 +58,9 @@
       </div>
 
 
+      <FocusDailyBoard v-if="showDailyBoard" />
+
+      <template v-else>
       <!-- Mini Timer Bars (shows all running timers in background) -->
       <div
         v-for="rt in timer.runningTimers.value"
@@ -235,6 +243,7 @@
           </div>
         </div>
       </div>
+      </template>
     </div>
 
     <!-- Task Detail Panel -->
@@ -313,6 +322,7 @@ const showStats = ref(false)
 const showCreateList = ref(false)
 const showStopConfirm = ref(false)
 const showTaskOptions = ref(false)
+const showDailyBoard = ref(false)
 
 // Provide for child components
 provide('showCreateList', showCreateList)

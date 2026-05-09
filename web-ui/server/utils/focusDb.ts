@@ -67,6 +67,16 @@ export function getDb(): Database.Database {
             collapsed INTEGER NOT NULL DEFAULT 0,
             "order" INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS daily_snapshots (
+            date TEXT PRIMARY KEY,
+            plannedJson TEXT NOT NULL,
+            completedJson TEXT NOT NULL,
+            carriedJson TEXT NOT NULL,
+            reportText TEXT NOT NULL,
+            createdAt INTEGER NOT NULL,
+            updatedAt INTEGER NOT NULL
+        );
     `)
 
     // Insert default list if none exists
@@ -120,5 +130,17 @@ export function rowToFolder(row: any) {
     return {
         ...row,
         collapsed: !!row.collapsed,
+    }
+}
+
+export function rowToDailySnapshot(row: any) {
+    return {
+        date: row.date,
+        planned: JSON.parse(row.plannedJson),
+        completed: JSON.parse(row.completedJson),
+        carried: JSON.parse(row.carriedJson),
+        reportText: row.reportText,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
     }
 }

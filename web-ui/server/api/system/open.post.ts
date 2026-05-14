@@ -1,10 +1,10 @@
 import { createError, defineEventHandler, readBody } from 'h3'
 import { spawn } from 'child_process'
-import * as fs from 'fs'
-import * as path from 'path'
+import { resolveOpenTargetPath, type OpenPathMode } from '../../utils/localPathOpen'
 
 type OpenLocalPathBody = {
   path?: string
+  mode?: OpenPathMode
 }
 
 const escapeSingleQuotedPowerShell = (input: string) => input.replace(/'/g, "''")
@@ -21,9 +21,14 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: '缺少要打开的本地路径' })
   }
 
-  const targetPath = path.resolve(rawPath)
-  if (!path.isAbsolute(targetPath) || !fs.existsSync(targetPath)) {
-    throw createError({ statusCode: 400, statusMessage: '本地路径不存在' })
+  let targetPath = ''
+  try {
+    targetPath = resolveOpenTargetPath(rawPath, body.mode === 'folder' ? 'folder' : 'path')
+  } catch (error) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: error instanceof Error ? error.message : '本地路径不存在',
+    })
   }
 
   const psPath = escapeSingleQuotedPowerShell(targetPath)

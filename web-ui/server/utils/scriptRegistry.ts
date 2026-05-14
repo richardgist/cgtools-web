@@ -1,5 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import { parsePowerShellParameters, type ScriptParameterInfo } from './scriptParameterParser.ts'
 
 const SCRIPT_ICONS: Record<string, string> = {
   '.py': '🐍',
@@ -7,57 +8,99 @@ const SCRIPT_ICONS: Record<string, string> = {
   '.ps1': '🟦',
 }
 
-const SCRIPT_PARAMETER_DEFINITIONS: Record<string, { params: Array<Record<string, unknown>> }> = {
+const SCRIPT_PARAMETER_OVERRIDES: Record<string, Record<string, Partial<ScriptParameterInfo>>> = {
   'Update-AllRepos.ps1': {
-    params: [
-      {
-        key: 'rootPath',
+    rootPath: {
         label: '更新根目录',
-        type: 'folder',
-        defaultValue: 'E:\\PUBGTrunk',
         placeholder: '选择包含 Survive 和 UE4181 的根目录',
-        argName: '-RootPath',
         required: true,
-      },
-    ],
+    },
+    p4Client: {
+      label: 'P4 Client',
+      placeholder: '当前项目对应的 Perforce workspace/client 名',
+      required: true,
+    },
+    svnOnly: {
+      label: '只更新 SVN',
+    },
+    p4Only: {
+      label: '只更新 P4',
+    },
+    conflictAbort: {
+      label: '遇到冲突立即停止',
+    },
   },
   'send_renderdoc_opengl_commands.ps1': {
-    params: [
-      {
-        key: 'packageName',
+    packageName: {
         label: '包名',
-        type: 'text',
-        defaultValue: 'com.tencent.tmgp.pubgmhd',
         placeholder: 'Android package name',
-        argName: '-PackageName',
         required: true,
-      },
-      {
-        key: 'deviceSerial',
+    },
+    deviceSerial: {
         label: '设备序列号',
-        type: 'text',
-        defaultValue: '',
         placeholder: '多设备时填写 adb serial',
-        argName: '-DeviceSerial',
-      },
-      {
-        key: 'commands',
+    },
+    commands: {
         label: '执行命令',
-        type: 'text',
-        defaultValue: 'r.RHISetGPUCaptureOptions 1;r.ShowMaterialDrawEvents 1',
         placeholder: '用分号分隔多条 UE console command',
-        argName: '-Commands',
         required: true,
-      },
-      {
-        key: 'requireProcess',
+    },
+    delayMs: {
+      label: '延迟毫秒',
+    },
+    requireProcess: {
         label: '要求进程',
-        type: 'text',
-        defaultValue: '1',
         placeholder: '1=游戏进程必须已启动，0=不检查',
-        argName: '-RequireProcess',
-      },
-    ],
+    },
+    dryRun: {
+      label: '仅预览命令',
+      placeholder: '1=只打印不执行，0=实际执行',
+    },
+  },
+  'pull_latest_stats.ps1': {
+    packageName: {
+        label: '包名',
+        placeholder: 'Android package name',
+        required: true,
+    },
+    projectName: {
+        label: 'UE 项目名',
+        placeholder: 'UE4Game 下的项目目录名',
+        required: true,
+    },
+    deviceSerial: {
+        label: '设备序列号',
+        placeholder: '多设备时填写 adb serial',
+    },
+    localDir: {
+        label: '保存目录',
+        placeholder: '默认保存到 scripts/Stats',
+    },
+    p4Client: {
+        label: 'P4 Client',
+        placeholder: '当前项目对应的 Perforce workspace/client 名',
+        required: true,
+    },
+  },
+  'pull_saved_dir.ps1': {
+    packageName: {
+        label: '包名',
+        placeholder: 'Android package name',
+        required: true,
+    },
+    projectName: {
+        label: 'UE 项目名',
+        placeholder: 'UE4Game 下的项目目录名',
+        required: true,
+    },
+    deviceSerial: {
+        label: '设备序列号',
+        placeholder: '多设备时填写 adb serial',
+    },
+    localDir: {
+        label: '保存目录',
+        placeholder: '默认保存到 scripts/Saved',
+    },
   },
 }
 
@@ -66,7 +109,7 @@ export type ScriptInfo = {
   path: string
   icon: string
   type: string
-  params?: Array<Record<string, unknown>>
+  params?: ScriptParameterInfo[]
 }
 
 export const getScriptsDir = () => path.resolve(process.cwd(), '../scripts')
@@ -74,6 +117,19 @@ export const getScriptsDir = () => path.resolve(process.cwd(), '../scripts')
 export const isSupportedScriptFile = (fileName: string) => {
   const ext = path.extname(fileName).toLowerCase()
   return Boolean(SCRIPT_ICONS[ext]) && !fileName.toLowerCase().includes('toolbox')
+}
+
+const getScriptParameters = (fileName: string, fullPath: string) => {
+  if (path.extname(fileName).toLowerCase() !== '.ps1') {
+    return []
+  }
+
+  const content = fs.readFileSync(fullPath, 'utf-8')
+  const overrides = SCRIPT_PARAMETER_OVERRIDES[fileName] || {}
+  return parsePowerShellParameters(content).map((param) => ({
+    ...param,
+    ...(overrides[param.key] || {}),
+  }))
 }
 
 export const resolveManagedScriptPath = (scriptPath: unknown) => {
@@ -120,12 +176,17 @@ export const listManagedScripts = () => {
     }
 
     const ext = path.extname(file).toLowerCase()
+    const icon = SCRIPT_ICONS[ext]
+    if (!icon) {
+      continue
+    }
+
     scripts.push({
       name: file,
       path: fullPath,
-      icon: SCRIPT_ICONS[ext],
+      icon,
       type: ext.substring(1),
-      ...(SCRIPT_PARAMETER_DEFINITIONS[file] || {}),
+      params: getScriptParameters(file, fullPath),
     })
   }
 

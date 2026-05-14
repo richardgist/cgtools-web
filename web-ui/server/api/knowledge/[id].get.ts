@@ -1,15 +1,12 @@
-// GET /api/knowledge/:id - 获取单张卡片的 Markdown 内容
-import { CARD_ID_PATTERN, getCardMarkdownBody, parseFrontmatter } from '../../utils/knowledgeCards'
+// GET /api/knowledge/:id - 获取 Vault 中任意知识节点的 Markdown 正文
+import { getCardMarkdownBody, parseFrontmatter } from '../../utils/knowledgeCards'
 
 export default defineEventHandler(async (event) => {
-  const id = getRouterParam(event, 'id')
+  const rawId = getRouterParam(event, 'id')
+  const id = rawId ? decodeURIComponent(rawId) : ''
 
   if (!id) {
     throw createError({ statusCode: 400, statusMessage: 'Missing card id' })
-  }
-
-  if (!CARD_ID_PATTERN.test(id)) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid card id format' })
   }
 
   const content = getCardMarkdownBody(id)

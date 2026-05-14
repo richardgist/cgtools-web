@@ -6,7 +6,8 @@ interface UpdateKnowledgeCardBody {
 }
 
 export default defineEventHandler(async (event) => {
-  const id = getRouterParam(event, 'id')
+  const rawId = getRouterParam(event, 'id')
+  const id = rawId ? decodeURIComponent(rawId) : ''
   if (!id) {
     throw createError({ statusCode: 400, statusMessage: 'Missing card id' })
   }

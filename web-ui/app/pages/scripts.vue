@@ -31,24 +31,67 @@
               :key="s.path"
               class="list-item" 
               :class="{ active: selectedScript && selectedScript.path === s.path }"
+              :title="`右键打开所在文件夹：${s.path}`"
               @click="selectScript(s)"
+              @contextmenu.prevent.stop="openLocalPathFolder(s.path)"
             >
               <span>{{ s.icon }}</span>
               <span>{{ s.name }}</span>
             </div>
           </div>
-          <div v-else class="script-items">
-            <div v-if="consoleHistory.length === 0" class="empty-hint">暂无命令历史</div>
-            <button
-              v-else
-              v-for="item in consoleHistory"
-              :key="item.id"
-              class="console-history-item"
-              @click="selectConsoleHistory(item)"
-            >
-              <span class="history-command">{{ item.command }}</span>
-              <span class="history-meta">{{ item.packageName || 'com.tencent.tmgp.pubgmhd' }}{{ item.deviceSerial ? ` · ${item.deviceSerial}` : '' }}</span>
-            </button>
+          <div v-else class="script-items console-history-list">
+            <div v-if="consoleHistoryGroups.length === 0" class="empty-hint">暂无命令历史</div>
+            <template v-else>
+              <section v-for="group in consoleHistoryGroups" :key="group.key" class="console-history-group">
+                <div class="console-history-group-title">
+                  <span>{{ group.label }}</span>
+                  <span>{{ group.items.length }}</span>
+                </div>
+                <div
+                  v-for="item in group.items"
+                  :key="item.id"
+                  class="console-history-item"
+                  :class="{ active: isConsoleHistoryItemActive(item), editing: editingConsoleHistoryId === item.id }"
+                >
+                  <button class="history-select-btn" type="button" @click="selectConsoleHistory(item)">
+                    <span class="history-command">{{ item.command }}</span>
+                    <span class="history-meta">{{ item.packageName || 'com.tencent.tmgp.pubgmhd' }}{{ item.deviceSerial ? ` · ${item.deviceSerial}` : '' }}</span>
+                    <span v-if="item.tags?.length" class="history-tags">
+                      <span v-for="tag in item.tags" :key="tag" class="history-tag">{{ tag }}</span>
+                    </span>
+                  </button>
+                  <div class="history-actions">
+                    <button
+                      class="history-tag-edit-btn"
+                      type="button"
+                      title="编辑备注标签"
+                      @click.stop="startEditConsoleHistoryTags(item)"
+                    >
+                      标签
+                    </button>
+                    <button
+                      class="history-delete-btn"
+                      type="button"
+                      title="删除这条收录"
+                      @click.stop="deleteConsoleHistoryItem(item)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                  <div v-if="editingConsoleHistoryId === item.id" class="history-tag-editor" @click.stop>
+                    <input
+                      v-model="editingConsoleHistoryTags"
+                      class="fluent-input history-tag-input"
+                      placeholder="备注标签，用空格或逗号分隔"
+                      @keydown.enter.prevent="saveConsoleHistoryTags(item)"
+                      @keydown.esc.prevent="cancelEditConsoleHistoryTags"
+                    />
+                    <button class="command-btn command-save compact" type="button" @click="saveConsoleHistoryTags(item)">保存</button>
+                    <button class="command-btn command-ghost compact" type="button" @click="cancelEditConsoleHistoryTags">取消</button>
+                  </div>
+                </div>
+              </section>
+            </template>
           </div>
         </section>
 
@@ -90,11 +133,40 @@
             </div>
           </div>
           <div v-if="activeMode === 'script' && selectedScriptParams.length" class="script-param-panel">
-            <div v-for="param in selectedScriptParams" :key="param.key" class="script-param-row">
-              <label>{{ param.label }}</label>
+            <div class="script-param-project-row">
+              <label>参数项目</label>
               <input
+                v-model="scriptParamProjectName"
+                class="fluent-input script-param-project-input"
+                list="script-param-projects"
+                placeholder="例如 trunk / PUBGTrunk / 测试分支"
+                :disabled="isRunning"
+                @change="applyScriptParamProjectName"
+                @blur="applyScriptParamProjectName"
+              />
+              <datalist id="script-param-projects">
+                <option
+                  v-for="project in selectedScriptParamProjects"
+                  :key="project"
+                  :value="project"
+                />
+              </datalist>
+            </div>
+            <div v-for="param in selectedScriptParams" :key="param.key" class="script-param-row">
+              <label class="script-param-label">{{ param.label }}</label>
+              <label v-if="param.type === 'switch'" class="script-param-switch">
+                <input
+                  v-model="scriptParamValues[param.key]"
+                  type="checkbox"
+                  :disabled="isRunning"
+                />
+                <span>{{ scriptParamValues[param.key] ? '启用' : '关闭' }}</span>
+              </label>
+              <input
+                v-else
                 v-model="scriptParamValues[param.key]"
                 class="fluent-input script-param-input"
+                :type="param.type === 'number' ? 'number' : 'text'"
                 :placeholder="param.placeholder || ''"
                 :disabled="isRunning"
               />
@@ -106,8 +178,9 @@
               >
                 {{ isPickingScriptFolder ? '打开中...' : '选择文件夹' }}
               </button>
+              <span v-else class="script-param-spacer"></span>
             </div>
-            <div class="script-param-hint">参数会按脚本自动保存，下次打开会继续使用最近一次的值。</div>
+            <div class="script-param-hint">参数会按“脚本 + 参数项目”自动保存，切换项目名会读取该项目上次使用的值。</div>
           </div>
           <div v-if="activeMode === 'console'" class="console-panel">
             <div class="console-row">
@@ -142,6 +215,17 @@
               @keyup="updateConsoleCursor"
               @keydown="handleConsoleCommandKeydown"
             ></textarea>
+            <div class="console-tag-row">
+              <label>备注标签</label>
+              <input
+                v-model="consoleHistoryTagInput"
+                class="fluent-input console-tag-input"
+                placeholder="例如：传送点 复现用 雨林"
+                :disabled="isRunning"
+                @keydown.enter.prevent="rememberConsoleCommand"
+              />
+              <span class="console-tag-hint">收录后会显示在左侧历史命令上</span>
+            </div>
             <div v-if="consoleSuggestions.length" class="console-suggestion-popover">
               <button
                 v-for="(suggestion, index) in consoleSuggestions"
@@ -157,6 +241,9 @@
             </div>
             <div class="console-sync-row">
               <span class="console-sync-state" :class="{ error: consoleCommandLoadError }">{{ consoleCommandStatusText }}</span>
+              <button class="command-btn command-save compact" @click="rememberConsoleCommand" :disabled="!consoleCommand.trim()">
+                {{ currentConsoleHistoryActionText }}
+              </button>
               <input
                 v-model="consoleCommandLocalPath"
                 class="fluent-input console-local-path-input"
@@ -204,8 +291,9 @@
                   v-if="part.kind === 'local-path'"
                   type="button"
                   class="terminal-path-link"
-                  :title="`用默认程序打开：${part.path}`"
+                  :title="`左键打开路径，右键打开所在文件夹：${part.path}`"
                   @click="openLocalPath(part.path)"
+                  @contextmenu.prevent="openLocalPathFolder(part.path)"
                 >{{ part.text }}</button>
                 <span v-else>{{ part.text }}</span>
               </template>
@@ -220,12 +308,82 @@
 <script setup>
 import { computed, ref, onMounted, nextTick, watch } from 'vue'
 
-const PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v1'
+const LEGACY_PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v1'
+const PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v2'
 const MODE_STORAGE_KEY = 'cgtools_script_runner_mode_v1'
 const CONSOLE_SETTINGS_STORAGE_KEY = 'cgtools_console_runner_settings_v1'
 const CONSOLE_HISTORY_STORAGE_KEY = 'cgtools_console_runner_history_v1'
 const CONSOLE_LOG_KEY = '__console__'
+const CONSOLE_HISTORY_LIMIT = 36
+const CONSOLE_HISTORY_TAG_LIMIT = 8
+const CONSOLE_HISTORY_TAG_MAX_LENGTH = 18
+const DEFAULT_SCRIPT_PARAM_PROJECT = '默认项目'
 const DEFAULT_CONSOLE_COMMAND_LOCAL_PATH = 'E:\\CJGame\\trunk\\Survive\\Saved\\Profiling\\CVar\\CVarList.csv'
+const CONSOLE_HISTORY_CATEGORIES = [
+  {
+    key: 'performance-recording',
+    label: '性能录制',
+    matchers: [
+      /^stat\s+startfile\b/i,
+      /^stat\s+stopfile\b/i,
+      /^trace\./i,
+      /^csvprofile\b/i,
+      /^csv\s/i,
+      /^startfpschart\b/i,
+      /^stopfpschart\b/i,
+    ],
+  },
+  {
+    key: 'performance-stats',
+    label: '性能观察',
+    matchers: [
+      /^stat\s/i,
+      /^stats\s/i,
+      /^statunit\b/i,
+      /^profilegpu\b/i,
+      /^dumpticks\b/i,
+      /^dumpparticle/i,
+    ],
+  },
+  {
+    key: 'log-level',
+    label: '日志级别',
+    matchers: [
+      /^log\s/i,
+      /^log(?:global|net|ai|script|render|rhi)/i,
+      /^.*log.*\b(?:verbose|veryverbose|warning|error|off)\b/i,
+    ],
+  },
+  {
+    key: 'rendering',
+    label: '渲染画质',
+    matchers: [
+      /^r\./i,
+      /^sg\./i,
+      /^show\b/i,
+      /^viewmode\b/i,
+      /^foliage\./i,
+      /^grass\./i,
+    ],
+  },
+  {
+    key: 'debug-tools',
+    label: '调试工具',
+    matchers: [
+      /^debug/i,
+      /^display/i,
+      /^toggle/i,
+      /^dump/i,
+      /^obj\b/i,
+      /^gc\b/i,
+    ],
+  },
+  {
+    key: 'other',
+    label: '其它命令',
+    matchers: [],
+  },
+]
 const scripts = ref([])
 const selectedScript = ref(null)
 const activeMode = ref('script')
@@ -238,11 +396,13 @@ const terminalEl = ref(null)
 const consoleTextareaEl = ref(null)
 const scriptParamValues = ref({})
 const scriptParamStore = ref({})
+const scriptParamProjectName = ref(DEFAULT_SCRIPT_PARAM_PROJECT)
 const consolePackageName = ref('com.tencent.tmgp.pubgmhd')
 const consoleDeviceSerial = ref('')
 const consoleRequireProcess = ref(true)
 const consoleCommand = ref('')
 const consoleCommandLocalPath = ref(DEFAULT_CONSOLE_COMMAND_LOCAL_PATH)
+const consoleHistoryTagInput = ref('')
 const consoleHistory = ref([])
 const consoleCommands = ref([])
 const consoleCommandSourcePath = ref('')
@@ -252,6 +412,8 @@ const consoleCursorIndex = ref(0)
 const consoleSuggestionIndex = ref(0)
 const isLoadingLocalConsoleCommands = ref(false)
 const isSyncingConsoleCommands = ref(false)
+const editingConsoleHistoryId = ref('')
+const editingConsoleHistoryTags = ref('')
 const scriptContent = ref('')
 const savedScriptContent = ref('')
 const scriptContentLoaded = ref(false)
@@ -303,6 +465,14 @@ const switchMode = (mode) => {
 }
 
 const selectedScriptParams = computed(() => selectedScript.value?.params || [])
+const selectedScriptParamProjects = computed(() => {
+  const key = getScriptParamKey(selectedScript.value)
+  if (!key) return [DEFAULT_SCRIPT_PARAM_PROJECT]
+  const entry = normalizeScriptParamStoreEntry(scriptParamStore.value[key])
+  return Object.keys(entry.projects).length
+    ? Object.keys(entry.projects)
+    : [DEFAULT_SCRIPT_PARAM_PROJECT]
+})
 const isScriptDirty = computed(() => scriptContentLoaded.value && scriptContent.value !== savedScriptContent.value)
 const canSaveScriptContent = computed(() => Boolean(
   selectedScript.value
@@ -378,6 +548,25 @@ const logs = computed(() => {
   const key = currentScriptLogKey.value
   return key ? (logsByScript.value[key] || []) : []
 })
+const isCurrentConsoleCommandCollected = computed(() => {
+  const commandKey = normalizeConsoleCommandKey(consoleCommand.value)
+  if (!commandKey) return false
+  return normalizeConsoleHistory(consoleHistory.value).some((item) => item.commandKey === commandKey)
+})
+const currentConsoleHistoryActionText = computed(() => (
+  isCurrentConsoleCommandCollected.value ? '更新收录' : '收录命令'
+))
+const consoleHistoryGroups = computed(() => {
+  const groups = CONSOLE_HISTORY_CATEGORIES
+    .map((category) => ({
+      key: category.key,
+      label: category.label,
+      items: consoleHistory.value.filter((item) => getConsoleCommandCategory(item.command).key === category.key),
+    }))
+    .filter((group) => group.items.length > 0)
+
+  return groups
+})
 
 const WINDOWS_LOCAL_PATH_RE = /[A-Za-z]:\\[^\r\n<>"|?*]+/g
 
@@ -420,17 +609,61 @@ const getScriptParamKey = (script) => script?.name || script?.path || ''
 const getDefaultScriptParams = (script) => {
   const defaults = {}
   for (const param of script?.params || []) {
-    defaults[param.key] = param.defaultValue || ''
+    defaults[param.key] = param.defaultValue ?? (param.type === 'switch' ? false : '')
   }
   return defaults
+}
+
+const normalizeScriptParamProjectName = (name) => {
+  const normalized = String(name || '').trim()
+  return normalized || DEFAULT_SCRIPT_PARAM_PROJECT
+}
+
+const normalizeScriptParamStoreEntry = (entry) => {
+  if (entry?.projects && typeof entry.projects === 'object') {
+    return {
+      activeProject: normalizeScriptParamProjectName(entry.activeProject),
+      projects: entry.projects,
+    }
+  }
+
+  if (entry && typeof entry === 'object') {
+    return {
+      activeProject: DEFAULT_SCRIPT_PARAM_PROJECT,
+      projects: {
+        [DEFAULT_SCRIPT_PARAM_PROJECT]: entry,
+      },
+    }
+  }
+
+  return {
+    activeProject: DEFAULT_SCRIPT_PARAM_PROJECT,
+    projects: {},
+  }
+}
+
+const migrateLegacyParamStore = () => {
+  try {
+    const raw = localStorage.getItem(LEGACY_PARAM_STORAGE_KEY)
+    const legacyStore = raw ? JSON.parse(raw) : {}
+    const migrated = {}
+
+    for (const [scriptKey, values] of Object.entries(legacyStore || {})) {
+      migrated[scriptKey] = normalizeScriptParamStoreEntry(values)
+    }
+
+    return migrated
+  } catch {
+    return {}
+  }
 }
 
 const loadParamStore = () => {
   try {
     const raw = localStorage.getItem(PARAM_STORAGE_KEY)
-    scriptParamStore.value = raw ? JSON.parse(raw) : {}
+    scriptParamStore.value = raw ? JSON.parse(raw) : migrateLegacyParamStore()
   } catch {
-    scriptParamStore.value = {}
+    scriptParamStore.value = migrateLegacyParamStore()
   }
 }
 
@@ -449,19 +682,22 @@ const loadConsoleState = () => {
     consoleDeviceSerial.value = typeof settings.deviceSerial === 'string' ? settings.deviceSerial : ''
     consoleRequireProcess.value = typeof settings.requireProcess === 'boolean' ? settings.requireProcess : true
     consoleCommand.value = typeof settings.command === 'string' ? settings.command : ''
+    consoleHistoryTagInput.value = typeof settings.historyTags === 'string' ? settings.historyTags : ''
     consoleCommandLocalPath.value = typeof settings.commandLocalPath === 'string' && settings.commandLocalPath.trim()
       ? settings.commandLocalPath
       : DEFAULT_CONSOLE_COMMAND_LOCAL_PATH
 
     const rawHistory = localStorage.getItem(CONSOLE_HISTORY_STORAGE_KEY)
     const history = rawHistory ? JSON.parse(rawHistory) : []
-    consoleHistory.value = Array.isArray(history) ? history.slice(0, 12) : []
+    consoleHistory.value = normalizeConsoleHistory(history)
+    persistConsoleHistory()
   } catch {
     activeMode.value = 'script'
     consolePackageName.value = 'com.tencent.tmgp.pubgmhd'
     consoleDeviceSerial.value = ''
     consoleRequireProcess.value = true
     consoleCommand.value = ''
+    consoleHistoryTagInput.value = ''
     consoleCommandLocalPath.value = DEFAULT_CONSOLE_COMMAND_LOCAL_PATH
     consoleHistory.value = []
   }
@@ -473,6 +709,7 @@ const persistConsoleSettings = () => {
     deviceSerial: consoleDeviceSerial.value,
     requireProcess: consoleRequireProcess.value,
     command: consoleCommand.value,
+    historyTags: consoleHistoryTagInput.value,
     commandLocalPath: consoleCommandLocalPath.value,
   }))
 }
@@ -481,45 +718,144 @@ const persistConsoleHistory = () => {
   localStorage.setItem(CONSOLE_HISTORY_STORAGE_KEY, JSON.stringify(consoleHistory.value))
 }
 
+const normalizeConsoleCommandKey = (command) => {
+  const normalized = String(command || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  return normalized.replace(/^stats?\s+units?\b/, 'stat unit')
+}
+
+const parseConsoleHistoryTags = (rawTags) => {
+  const source = Array.isArray(rawTags) ? rawTags.join(' ') : String(rawTags || '')
+  const tags = []
+  const seen = new Set()
+
+  for (const rawTag of source.split(/[\s,，、;；]+/)) {
+    const tag = rawTag.trim().replace(/^#+/, '').slice(0, CONSOLE_HISTORY_TAG_MAX_LENGTH)
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) continue
+
+    seen.add(key)
+    tags.push(tag)
+    if (tags.length >= CONSOLE_HISTORY_TAG_LIMIT) break
+  }
+
+  return tags
+}
+
+const formatConsoleHistoryTags = (tags) => parseConsoleHistoryTags(tags).join(' ')
+
+const getConsoleCommandCategory = (command) => {
+  const text = String(command || '').trim()
+  return CONSOLE_HISTORY_CATEGORIES.find((category) => (
+    category.key === 'other' || category.matchers.some((matcher) => matcher.test(text))
+  )) || CONSOLE_HISTORY_CATEGORIES[CONSOLE_HISTORY_CATEGORIES.length - 1]
+}
+
+const normalizeConsoleHistory = (history) => {
+  const seen = new Set()
+  const normalized = []
+
+  for (const rawItem of Array.isArray(history) ? history : []) {
+    const command = typeof rawItem?.command === 'string' ? rawItem.command.trim() : ''
+    const commandKey = normalizeConsoleCommandKey(command)
+    if (!commandKey || seen.has(commandKey)) continue
+
+    const category = getConsoleCommandCategory(command)
+    seen.add(commandKey)
+    normalized.push({
+      id: typeof rawItem?.id === 'string' ? rawItem.id : `${Date.now()}-${normalized.length}`,
+      command,
+      commandKey,
+      category: category.key,
+      packageName: typeof rawItem?.packageName === 'string' && rawItem.packageName.trim()
+        ? rawItem.packageName.trim()
+        : 'com.tencent.tmgp.pubgmhd',
+      deviceSerial: typeof rawItem?.deviceSerial === 'string' ? rawItem.deviceSerial.trim() : '',
+      requireProcess: typeof rawItem?.requireProcess === 'boolean' ? rawItem.requireProcess : true,
+      tags: parseConsoleHistoryTags(rawItem?.tags || rawItem?.remarkTags || rawItem?.labels || rawItem?.note),
+    })
+  }
+
+  return normalized.slice(0, CONSOLE_HISTORY_LIMIT)
+}
+
 const persistSelectedScriptParams = () => {
   if (!selectedScript.value) return
   const key = getScriptParamKey(selectedScript.value)
   if (!key) return
 
+  const projectName = normalizeScriptParamProjectName(scriptParamProjectName.value)
+  const currentEntry = normalizeScriptParamStoreEntry(scriptParamStore.value[key])
   scriptParamStore.value = {
     ...scriptParamStore.value,
-    [key]: { ...scriptParamValues.value },
+    [key]: {
+      activeProject: projectName,
+      projects: {
+        ...currentEntry.projects,
+        [projectName]: { ...scriptParamValues.value },
+      },
+    },
   }
   localStorage.setItem(PARAM_STORAGE_KEY, JSON.stringify(scriptParamStore.value))
 }
 
 const applySavedScriptParams = (script) => {
   const key = getScriptParamKey(script)
-  const saved = key ? scriptParamStore.value[key] || {} : {}
+  const entry = key ? normalizeScriptParamStoreEntry(scriptParamStore.value[key]) : normalizeScriptParamStoreEntry(null)
+  const projectName = normalizeScriptParamProjectName(entry.activeProject)
+  const saved = entry.projects[projectName] || {}
+  scriptParamProjectName.value = projectName
   scriptParamValues.value = {
     ...getDefaultScriptParams(script),
     ...saved,
   }
 }
 
+const applyScriptParamProjectName = () => {
+  if (!selectedScript.value) return
+  const projectName = normalizeScriptParamProjectName(scriptParamProjectName.value)
+  const key = getScriptParamKey(selectedScript.value)
+  const entry = normalizeScriptParamStoreEntry(scriptParamStore.value[key])
+  const saved = entry.projects[projectName] || {}
+
+  scriptParamProjectName.value = projectName
+  scriptParamValues.value = {
+    ...getDefaultScriptParams(selectedScript.value),
+    ...saved,
+  }
+  persistSelectedScriptParams()
+}
+
 const rememberConsoleCommand = () => {
   const command = consoleCommand.value.trim()
   if (!command) return
+  const commandKey = normalizeConsoleCommandKey(command)
+  const category = getConsoleCommandCategory(command)
 
   const item = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     command,
+    commandKey,
+    category: category.key,
     packageName: consolePackageName.value.trim() || 'com.tencent.tmgp.pubgmhd',
     deviceSerial: consoleDeviceSerial.value.trim(),
     requireProcess: consoleRequireProcess.value,
+    tags: parseConsoleHistoryTags(consoleHistoryTagInput.value),
   }
-  const deduped = consoleHistory.value.filter((entry) => (
-    entry.command !== item.command
-      || entry.packageName !== item.packageName
-      || entry.deviceSerial !== item.deviceSerial
-      || entry.requireProcess !== item.requireProcess
+  const deduped = normalizeConsoleHistory(consoleHistory.value).filter((entry) => (
+    (entry.commandKey || normalizeConsoleCommandKey(entry.command)) !== item.commandKey
   ))
-  consoleHistory.value = [item, ...deduped].slice(0, 12)
+  consoleHistory.value = [item, ...deduped].slice(0, CONSOLE_HISTORY_LIMIT)
+  persistConsoleHistory()
+}
+
+const deleteConsoleHistoryItem = (item) => {
+  const commandKey = item.commandKey || normalizeConsoleCommandKey(item.command)
+  consoleHistory.value = normalizeConsoleHistory(consoleHistory.value).filter((entry) => (
+    (entry.commandKey || normalizeConsoleCommandKey(entry.command)) !== commandKey
+  ))
+  if (editingConsoleHistoryId.value === item.id) {
+    cancelEditConsoleHistoryTags()
+  }
   persistConsoleHistory()
 }
 
@@ -528,6 +864,7 @@ const selectConsoleHistory = (item) => {
   consolePackageName.value = item.packageName || 'com.tencent.tmgp.pubgmhd'
   consoleDeviceSerial.value = item.deviceSerial || ''
   consoleRequireProcess.value = typeof item.requireProcess === 'boolean' ? item.requireProcess : true
+  consoleHistoryTagInput.value = formatConsoleHistoryTags(item.tags)
   persistConsoleSettings()
   nextTick(() => {
     if (!consoleTextareaEl.value) return
@@ -536,6 +873,39 @@ const selectConsoleHistory = (item) => {
     consoleTextareaEl.value.setSelectionRange(cursor, cursor)
     updateConsoleCursor()
   })
+}
+
+const isConsoleHistoryItemActive = (item) => {
+  const commandKey = item.commandKey || normalizeConsoleCommandKey(item.command)
+  return Boolean(commandKey && commandKey === normalizeConsoleCommandKey(consoleCommand.value))
+}
+
+const startEditConsoleHistoryTags = (item) => {
+  editingConsoleHistoryId.value = item.id
+  editingConsoleHistoryTags.value = formatConsoleHistoryTags(item.tags)
+}
+
+const cancelEditConsoleHistoryTags = () => {
+  editingConsoleHistoryId.value = ''
+  editingConsoleHistoryTags.value = ''
+}
+
+const saveConsoleHistoryTags = (item) => {
+  const tags = parseConsoleHistoryTags(editingConsoleHistoryTags.value)
+  const commandKey = item.commandKey || normalizeConsoleCommandKey(item.command)
+
+  consoleHistory.value = normalizeConsoleHistory(consoleHistory.value).map((entry) => {
+    const entryKey = entry.commandKey || normalizeConsoleCommandKey(entry.command)
+    return entryKey === commandKey ? { ...entry, tags } : entry
+  })
+
+  if (commandKey && commandKey === normalizeConsoleCommandKey(consoleCommand.value)) {
+    consoleHistoryTagInput.value = formatConsoleHistoryTags(tags)
+    persistConsoleSettings()
+  }
+
+  cancelEditConsoleHistoryTags()
+  persistConsoleHistory()
 }
 
 const getErrorMessage = (error, fallback) => {
@@ -653,8 +1023,9 @@ const acceptConsoleSuggestion = (suggestion = consoleSuggestions.value[consoleSu
     replaceStart += 1
   }
 
-  const nextValue = `${consoleCommand.value.slice(0, replaceStart)}${suggestion.name}${afterCursor}`
-  const nextCursor = replaceStart + suggestion.name.length
+  const suggestionText = suggestion.insertText || suggestion.name
+  const nextValue = `${consoleCommand.value.slice(0, replaceStart)}${suggestionText}${afterCursor}`
+  const nextCursor = replaceStart + suggestionText.length
   consoleCommand.value = nextValue
   consoleSuggestionIndex.value = 0
 
@@ -788,18 +1159,20 @@ const buildScriptArgs = () => {
   return args
 }
 
-const pickFolder = async () => {
+const pickFolder = async (initialPath = '') => {
   if (isPickingScriptFolder.value) return
   isPickingScriptFolder.value = true
   appendLog('info', '[info] 正在打开文件夹选择器...\n')
 
   try {
-    const res = await $fetch('/api/system/folder')
+    const query = initialPath ? { path: initialPath } : {}
+    const res = await $fetch('/api/system/folder', { query })
     if (res.success && res.path) {
       appendLog('info', `[info] 已选择文件夹：${res.path}\n`)
       return res.path
     }
 
+    if (res.cancelled) return ''
     appendLog('stderr', `[warning] ${res.error || '选择文件夹失败'}\n`)
   } catch (error) {
     appendLog('stderr', `[error] 选择文件夹失败：${error.message}\n`)
@@ -809,7 +1182,7 @@ const pickFolder = async () => {
 }
 
 const pickScriptFolder = async (key) => {
-  const path = await pickFolder()
+  const path = await pickFolder(scriptParamValues.value[key])
   if (!path) return
 
   scriptParamValues.value = {
@@ -909,6 +1282,20 @@ const openLocalPath = async (path) => {
   }
 }
 
+const openLocalPathFolder = async (path) => {
+  try {
+    const res = await $fetch('/api/system/open', {
+      method: 'POST',
+      body: { path, mode: 'folder' },
+    })
+    if (!res?.success) {
+      appendLog('stderr', `[error] 打开所在文件夹失败：${res?.error || path}\n`)
+    }
+  } catch (error) {
+    appendLog('stderr', `[error] 打开所在文件夹失败：${getErrorMessage(error, '未知错误')}\n`)
+  }
+}
+
 const startTerminalRun = (runLogKey, startLine, payload) => {
   appendLog('info', startLine, runLogKey)
   isRunning.value = true
@@ -974,7 +1361,6 @@ const runConsoleCommand = () => {
   }
 
   persistConsoleSettings()
-  rememberConsoleCommand()
   const packageName = consolePackageName.value.trim() || 'com.tencent.tmgp.pubgmhd'
   const deviceText = consoleDeviceSerial.value.trim() || '默认设备'
   startTerminalRun(CONSOLE_LOG_KEY, `▶ UE Console: ${command}\n[pkg] ${packageName}\n[device] ${deviceText}\n`, {
@@ -1018,7 +1404,15 @@ watch(scriptParamValues, () => {
   persistSelectedScriptParams()
 }, { deep: true })
 
-watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCommand, consoleCommandLocalPath], () => {
+watch(consoleCommand, (command, previousCommand) => {
+  const commandKey = normalizeConsoleCommandKey(command)
+  if (commandKey === normalizeConsoleCommandKey(previousCommand)) return
+
+  const historyItem = normalizeConsoleHistory(consoleHistory.value).find((item) => item.commandKey === commandKey)
+  consoleHistoryTagInput.value = historyItem ? formatConsoleHistoryTags(historyItem.tags) : ''
+})
+
+watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCommand, consoleHistoryTagInput, consoleCommandLocalPath], () => {
   persistConsoleSettings()
 })
 </script>
@@ -1068,28 +1462,111 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   text-align: center;
 }
 
+.console-history-list {
+  gap: 12px;
+}
+
+.console-history-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.console-history-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
 .console-history-item {
   display: flex;
   width: 100%;
   min-width: 0;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.console-history-item:hover,
+.console-history-item:focus-within,
+.console-history-item.active {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.console-history-item.editing {
+  background: rgba(96, 205, 255, 0.06);
+}
+
+.history-select-btn {
+  display: flex;
+  min-width: 0;
+  flex: 1;
   flex-direction: column;
   gap: 5px;
-  padding: 10px 12px;
+  padding: 10px 0 10px 12px;
   border: 0;
-  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   background: transparent;
   text-align: left;
   cursor: pointer;
 }
 
-.console-history-item:hover {
-  color: var(--text-primary);
-  background-color: rgba(255, 255, 255, 0.04);
+.history-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding-right: 6px;
+}
+
+.history-tag-edit-btn,
+.history-delete-btn {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.history-tag-edit-btn {
+  border: 1px solid rgba(96, 205, 255, 0.2);
+  color: #9de5ff;
+  background: rgba(96, 205, 255, 0.08);
+}
+
+.history-tag-edit-btn:hover {
+  border-color: rgba(96, 205, 255, 0.44);
+  color: #d8f7ff;
+  background: rgba(96, 205, 255, 0.14);
+}
+
+.history-delete-btn {
+  border: 1px solid rgba(248, 113, 113, 0.18);
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.08);
+}
+
+.history-delete-btn:hover {
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.22);
 }
 
 .history-command,
-.history-meta {
+.history-meta,
+.history-tag {
   overflow: hidden;
   max-width: 100%;
   text-overflow: ellipsis;
@@ -1107,10 +1584,51 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   font-size: 11px;
 }
 
+.history-tags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.history-tag {
+  max-width: 118px;
+  padding: 2px 6px;
+  border: 1px solid rgba(96, 205, 255, 0.18);
+  border-radius: 999px;
+  color: #b7ecff;
+  background: rgba(96, 205, 255, 0.08);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.history-tag-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  width: 100%;
+  padding: 0 6px 8px 12px;
+}
+
+.history-tag-input {
+  min-width: 0;
+  height: 28px;
+  font-size: 12px;
+}
+
 .script-param-panel {
   padding: 14px 16px;
   border-bottom: 1px solid var(--divider);
   background: rgba(255, 255, 255, 0.015);
+}
+
+.script-param-project-row {
+  display: grid;
+  grid-template-columns: 120px minmax(260px, 420px);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
 .script-param-row {
@@ -1120,15 +1638,44 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   align-items: center;
 }
 
-.script-param-row label {
+.script-param-project-row label,
+.script-param-label {
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 600;
 }
 
+.script-param-project-input {
+  min-width: 0;
+}
+
 .script-param-input {
   width: 100%;
   min-width: 0;
+}
+
+.script-param-switch {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.script-param-switch input {
+  width: 15px;
+  height: 15px;
+}
+
+.script-param-spacer {
+  width: 1px;
 }
 
 .script-param-hint {
@@ -1349,6 +1896,31 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   box-shadow: 0 0 0 1px rgba(96, 205, 255, 0.28);
 }
 
+.console-tag-row {
+  display: grid;
+  grid-template-columns: auto minmax(240px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.console-tag-row label {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.console-tag-input {
+  min-width: 0;
+}
+
+.console-tag-hint {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .console-suggestion-popover {
   position: absolute;
   left: 14px;
@@ -1383,10 +1955,18 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   border-bottom: 0;
 }
 
-.console-suggestion-item.active,
-.console-suggestion-item:hover {
+.console-suggestion-item.active {
   color: #071318;
   background: var(--accent-default);
+}
+
+.console-suggestion-item:hover:not(.active) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.console-suggestion-item:focus {
+  outline: none;
 }
 
 .suggestion-name {
@@ -1497,8 +2077,10 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 }
 
 @media (max-width: 900px) {
+  .script-param-project-row,
   .script-param-row,
-  .console-row {
+  .console-row,
+  .console-tag-row {
     grid-template-columns: 1fr;
   }
 

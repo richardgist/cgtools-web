@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   filterConsoleCommandSuggestions,
+  mergeBuiltInConsoleCommands,
   loadConsoleCommandSnapshotFromPath,
   parseConsoleCommandCsv,
 } from '../ueConsoleCommands'
@@ -30,6 +31,44 @@ assert.equal(grassMatches[1].name, 'grass.HeightScaleEnableAll')
 const statMatches = filterConsoleCommandSuggestions(parsed, 'sta')
 assert.deepEqual(statMatches.map((item) => item.name), ['stat units', 'stat unit'])
 
+const mergedWithBuiltIns = mergeBuiltInConsoleCommands(parsed)
+assert(!mergedWithBuiltIns.some((item) => item.name.toLowerCase().startsWith('servercmd')))
+
+const startfileWithArg = mergedWithBuiltIns.find((item) => item.name === 'stat startfile <Filename>')
+assert.equal(startfileWithArg?.insertText, 'stat startfile ')
+assert.equal(startfileWithArg?.category, '性能录制')
+
+const statStartFileMatches = filterConsoleCommandSuggestions(mergedWithBuiltIns, 'stat start')
+assert.deepEqual(
+  statStartFileMatches.map((item) => item.name),
+  [
+    'stat startfile',
+    'stat startfile <Filename>',
+    'stat startfilelua',
+    'stat startfilelua <Filename>',
+    'stat startfilefilter -t=80.0 -c=3',
+    'stat startfileraw',
+  ],
+)
+
+const rawStartFileMatches = filterConsoleCommandSuggestions(mergedWithBuiltIns, 'startfile')
+assert.equal(rawStartFileMatches[0].name, 'stat startfile')
+
+const chineseRecordMatches = filterConsoleCommandSuggestions(mergedWithBuiltIns, '录制')
+assert(chineseRecordMatches.some((item) => item.name === 'stat startfile'))
+assert(chineseRecordMatches.some((item) => item.name === 'netprofile enable'))
+
+const memoryMatches = filterConsoleCommandSuggestions(mergedWithBuiltIns, '内存')
+assert(memoryMatches.some((item) => item.name === 'memreport -full'))
+assert(memoryMatches.some((item) => item.name === 'LuaMemReport'))
+
+const liteStatsMatches = filterConsoleCommandSuggestions(mergedWithBuiltIns, 'litestats')
+assert(liteStatsMatches.some((item) => item.name === 'LS.ActivateConfig UGCDeveloperDefault'))
+assert(liteStatsMatches.some((item) => item.name === 'LS.DeactivateConfig UGCDeveloperDefault'))
+
+const objectReferenceMatches = filterConsoleCommandSuggestions(mergedWithBuiltIns, '引用')
+assert(objectReferenceMatches.some((item) => item.name === 'Obj Refs Name=<ObjectName>'))
+
 const indexedCsv = [
   'Index,Name,Value',
   '0,r.DumpingMovie,0',
@@ -53,6 +92,7 @@ fs.writeFileSync(localCsvPath, csv, 'utf-8')
 const localSnapshot = loadConsoleCommandSnapshotFromPath(localCsvPath)
 assert.equal(localSnapshot.sourcePath, localCsvPath)
 assert.deepEqual(
-  localSnapshot.commands.map((item) => item.name),
-  ['grass.HeightScale', 'grass.HeightScaleEnableAll', 'stat units', 'stat unit'],
+  localSnapshot.commands.slice(0, 3).map((item) => item.name),
+  ['stat startfile', 'stat startfile <Filename>', 'stat stopfile'],
 )
+assert(localSnapshot.commands.some((item) => item.name === 'grass.HeightScale'))

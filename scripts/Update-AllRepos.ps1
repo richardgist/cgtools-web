@@ -7,12 +7,16 @@
 #region ==================== COMMAND-LINE PARAMETERS ====================
 param(
     [string]$RootPath = "E:\PUBGTrunk",
+    [string]$P4Client = "jesephjiang_JESEPHJIAN-PCBU_E_Trunk",
 
     [Alias('svn')]
     [switch]$SvnOnly,
 
     [Alias('p4')]
     [switch]$P4Only,
+
+    [Alias('latest')]
+    [switch]$P4Latest,
 
     [Alias('conflict-abort')]
     [switch]$ConflictAbort
@@ -68,8 +72,39 @@ $SVN_REPOS = @(
 # These will be set as P4PORT and P4USER environment variables at runtime.
 # Leave empty ("") to use the existing system/user environment variable values.
 $P4_PORT = "cgproxy.ied.com:9666"   # e.g., "ssl:perforce.company.com:1666"
-$P4_USER = "willsguo"   # e.g., "john.doe"
+$P4_USER = "jesephjiang"   # e.g., "john.doe"
 
+$ResolvedP4Client = if ($P4Client -and $P4Client.Trim()) {
+    $P4Client.Trim()
+} elseif ($env:P4CLIENT) {
+    $env:P4CLIENT
+} else {
+    ""
+}
+
+# Preferred P4 sync path:
+#   The project already ships Tools\ParallelP4Sync. Use it by default so this
+#   wrapper follows the same directory list and parallel sync behavior as the
+#   project update tool.
+$ParallelP4SyncRoot = Join-Path -Path $UpdateRoot -ChildPath "Survive\Tools\ParallelP4Sync"
+$ParallelP4SyncArgs = @("main.py", "daily")
+if ($P4Latest.IsPresent) {
+    $ParallelP4SyncArgs += "latest"
+}
+
+$P4_SYNC_TOOLS = @(
+    @{
+        Name      = "ParallelP4Sync"
+        RootPath  = $ParallelP4SyncRoot
+        Command   = "python"
+        Arguments = $ParallelP4SyncArgs
+        P4Client  = $ResolvedP4Client
+    }
+)
+
+# Legacy direct P4 workspace sync fallback. Keep empty by default; the project
+# updater above is the normal P4 path now.
+#
 # P4 Workspaces: Array of objects, each containing:
 #   - P4Client:  The Perforce client workspace name (used as P4CLIENT)
 #   - RootPath:  The local root folder path of the workspace
@@ -77,6 +112,11 @@ $P4_USER = "willsguo"   # e.g., "john.doe"
 #                If specified, only these sub-directories will be synced instead of
 #                the entire workspace. Paths are relative to RootPath.
 #                If omitted or empty, the entire workspace will be synced.
+#   - EnumerateSubDirs:
+#                (Optional) If true, queries immediate P4 child directories under
+#                RootPath and syncs each child directory separately. This keeps
+#                large roots such as Survive and UE4181 split without hardcoding
+#                every child folder in this script.
 #
 #                Each entry in SubDirs can be:
 #                  - A simple string: e.g., "Source\Runtime"
@@ -105,17 +145,7 @@ $P4_USER = "willsguo"   # e.g., "john.doe"
 #          ) }
 #   )
 $P4_WORKSPACES = @(
-    # Add your P4 workspace configurations here
-    # Sync entire workspace:
-    # @{ P4Client = "my_workspace"; RootPath = "E:\P4\MyWorkspace" }
-    #
-    # Sync only specific sub-directories (with optional batching):
-    @{ P4Client = "willsguo_Trunk_WILLSGUO-PC0_4388"; RootPath = (Join-Path -Path $UpdateRoot -ChildPath "Survive");
-        SubDirs = @(
-            "Plugins",
-            @{ Path = "Content"; BatchCount = 8 },
-            "Config"
-        ) }
+    # Add fallback P4 workspace configurations here only if ParallelP4Sync is unavailable.
 )
 
 #endregion ==================== CONFIGURATION ====================
@@ -345,6 +375,108 @@ function Split-IntoBatches {
     return $batches
 }
 
+function Get-P4MappedChildDirs {
+    <#
+    .SYNOPSIS
+        Returns immediate depot-backed child directories under a local P4 root.
+    .DESCRIPTION
+        Uses "p4 dirs" instead of local directory enumeration so editor/cache-only
+        folders such as .vs, Intermediate, and DerivedDataCache are not treated as
+        update targets.
+    #>
+    param(
+        [string]$RootPath,
+        [string]$ClientName
+    )
+
+    $normalizedRoot = ($RootPath -replace '[\\/]+$', '')
+    $p4Args = @()
+    if ($ClientName -and $ClientName.Trim()) {
+        $p4Args += @("-c", $ClientName.Trim())
+    }
+    $p4Args += @("dirs", "$normalizedRoot\*")
+
+    $dirsOutput = & p4 @p4Args 2>&1
+    $childDirs = @()
+
+    foreach ($rawLine in @($dirsOutput)) {
+        $line = ([string]$rawLine).Trim()
+        if (-not $line) { continue }
+        if ($line -match 'no such file\(s\)' -or $line -match 'not under client') { continue }
+
+        if ($line -match '^//') {
+            $line = $line -replace '/', '\'
+        }
+
+        $childName = Split-Path -Path $line -Leaf
+        if ($childName) {
+            $childDirs += $childName
+        }
+    }
+
+    return @($childDirs | Sort-Object -Unique)
+}
+
+function Invoke-P4SyncTool {
+    <#
+    .SYNOPSIS
+        Runs an external project P4 sync tool and streams its output.
+    #>
+    param(
+        [hashtable]$Tool
+    )
+
+    $result = @{
+        Output   = ""
+        ExitCode = 0
+        HasError = $false
+    }
+
+    $savedP4Client = $env:P4CLIENT
+    $savedP4User = $env:P4USER
+    $savedP4Port = $env:P4PORT
+    $pushedLocation = $false
+    $outputLines = @()
+
+    try {
+        if ($Tool.P4Client -and $Tool.P4Client.Trim()) {
+            $env:P4CLIENT = $Tool.P4Client.Trim()
+        }
+
+        Push-Location -LiteralPath $Tool.RootPath
+        $pushedLocation = $true
+
+        Write-LogInfo "  Command: $($Tool.Command) $($Tool.Arguments -join ' ')"
+        & $Tool.Command @($Tool.Arguments) 2>&1 | ForEach-Object {
+            $line = [string]$_
+            $outputLines += $line
+            Write-Host $line
+        }
+
+        $result.ExitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+        $result.Output = $outputLines -join "`n"
+
+        if ($result.ExitCode -ne 0 -or $result.Output -match '(?im)(Error executing|\[ERROR\]|Traceback|Command failed)') {
+            $result.HasError = $true
+        }
+    }
+    catch {
+        $result.ExitCode = 1
+        $result.HasError = $true
+        $result.Output = ($outputLines + "Exception during P4 sync tool: $($_.Exception.Message)") -join "`n"
+    }
+    finally {
+        if ($pushedLocation) {
+            Pop-Location
+        }
+        $env:P4CLIENT = $savedP4Client
+        $env:P4USER = $savedP4User
+        $env:P4PORT = $savedP4Port
+    }
+
+    return $result
+}
+
 #endregion ==================== HELPER FUNCTIONS ====================
 
 
@@ -377,9 +509,15 @@ if ($script:ConflictAbortEnabled) {
 }
 
 Write-LogInfo "Update root: $UpdateRoot"
+if ($P4Latest.IsPresent) {
+    Write-LogInfo "P4 mode: ParallelP4Sync daily latest"
+} else {
+    Write-LogInfo "P4 mode: ParallelP4Sync daily"
+}
 
 # Display the script header
-Write-ScriptHeader -SvnCount $SVN_REPOS.Count -P4Count $P4_WORKSPACES.Count
+$configuredP4Count = $P4_SYNC_TOOLS.Count + $P4_WORKSPACES.Count
+Write-ScriptHeader -SvnCount $SVN_REPOS.Count -P4Count $configuredP4Count
 
 #endregion ==================== INITIALIZATION ====================
 
@@ -440,6 +578,36 @@ if ($svnAvailable -and $SVN_REPOS.Count -gt 0) {
     Write-LogInfo "No SVN repositories configured."
 }
 
+# Validate external P4 sync tools
+$validP4SyncTools = @()
+$pythonAvailable = $false
+if (Get-Command "python" -ErrorAction SilentlyContinue) {
+    $pythonAvailable = $true
+    Write-LogSuccess "Python command found in PATH."
+} else {
+    Write-LogError "Python command not found in PATH. ParallelP4Sync will be skipped."
+}
+
+if ($p4Available -and $pythonAvailable -and $P4_SYNC_TOOLS.Count -gt 0) {
+    foreach ($p4Tool in $P4_SYNC_TOOLS) {
+        if (-not (Test-Path -Path $p4Tool.RootPath -PathType Container)) {
+            Write-LogWarning "P4 sync tool root does not exist, skipping: $($p4Tool.Name) -> $($p4Tool.RootPath)"
+            continue
+        }
+
+        $mainScript = Join-Path -Path $p4Tool.RootPath -ChildPath "main.py"
+        if (-not (Test-Path -Path $mainScript -PathType Leaf)) {
+            Write-LogWarning "P4 sync tool main.py does not exist, skipping: $mainScript"
+            continue
+        }
+
+        $validP4SyncTools += $p4Tool
+        Write-LogInfo "P4 sync tool validated: $($p4Tool.Name) -> $($p4Tool.RootPath)"
+    }
+} elseif ($p4Available -and $P4_SYNC_TOOLS.Count -gt 0) {
+    Write-LogWarning "P4 sync tools configured but prerequisites are missing."
+}
+
 # Validate P4 workspace root paths and sub-directories
 $validP4Workspaces = @()
 if ($p4Available -and $P4_WORKSPACES.Count -gt 0) {
@@ -451,8 +619,24 @@ if ($p4Available -and $P4_WORKSPACES.Count -gt 0) {
 
         # Validate sub-directories if specified
         # Normalize SubDirs entries: each becomes @{ Path = "..."; BatchCount = N }
+        $enumerateSubDirs = $p4ws.ContainsKey('EnumerateSubDirs') -and [bool]$p4ws.EnumerateSubDirs
         $hasSubDirs = $p4ws.ContainsKey('SubDirs') -and $p4ws.SubDirs -and $p4ws.SubDirs.Count -gt 0
-        if ($hasSubDirs) {
+        if ($enumerateSubDirs) {
+            $childDirNames = Get-P4MappedChildDirs -RootPath $p4ws.RootPath -ClientName $p4ws.P4Client
+            if (-not $childDirNames -or $childDirNames.Count -eq 0) {
+                Write-LogWarning "P4 workspace has no mapped child directories, skipping: $($p4ws.P4Client) -> $($p4ws.RootPath)"
+                continue
+            }
+
+            $validSubDirs = @()
+            foreach ($childName in $childDirNames) {
+                $validSubDirs += @{ Path = $childName; BatchCount = 1 }
+                Write-LogInfo "  P4 mapped child directory discovered: $childName"
+            }
+
+            $p4ws.ValidSubDirs = $validSubDirs
+            Write-LogInfo "P4 workspace validated: $($p4ws.P4Client) -> $($p4ws.RootPath) (Enumerated SubDirs: $($validSubDirs.Count))"
+        } elseif ($hasSubDirs) {
             $validSubDirs = @()
             foreach ($subDirEntry in $p4ws.SubDirs) {
                 # Normalize entry to hashtable format
@@ -499,7 +683,7 @@ if ($p4Available -and $P4_WORKSPACES.Count -gt 0) {
 }
 
 # Check if there is anything to do
-$totalValid = $validSvnRepos.Count + $validP4Workspaces.Count
+$totalValid = $validSvnRepos.Count + $validP4SyncTools.Count + $validP4Workspaces.Count
 if ($totalValid -eq 0) {
     Write-Host ""
     Write-LogWarning "No valid repositories to update. Nothing to do."
@@ -509,7 +693,7 @@ if ($totalValid -eq 0) {
     exit 0
 }
 
-Write-LogInfo "Validated $totalValid repositories ready for update (SVN: $($validSvnRepos.Count), P4: $($validP4Workspaces.Count))."
+Write-LogInfo "Validated $totalValid repositories ready for update (SVN: $($validSvnRepos.Count), P4 tools: $($validP4SyncTools.Count), P4 fallback workspaces: $($validP4Workspaces.Count))."
 
 #endregion ==================== PREREQUISITE VALIDATION ====================
 

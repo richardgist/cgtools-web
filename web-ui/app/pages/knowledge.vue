@@ -4,11 +4,15 @@
       <h1 class="header-title">知识卡片</h1>
       <div class="header-controls">
         <span class="kc-badge">{{ filteredCards.length }} / {{ cards.length }} 张卡片</span>
+        <div class="kc-view-switch">
+          <button class="kc-view-btn" :class="{ active: activeView === 'cards' }" @click="activeView = 'cards'">卡片</button>
+          <button class="kc-view-btn" :class="{ active: activeView === 'graph' }" @click="showGraphView">网络</button>
+        </div>
         <button class="fluent-btn" @click="openCreateModal">新增卡片</button>
-        <button class="fluent-btn" @click="openImportModal">📁 从文件夹导入</button>
+        <button class="fluent-btn" @click="openImportModal">导入 MD</button>
         <button class="fluent-btn" @click="openDeduplicateModal" style="color: #e67e22;">🧹 清理冗余</button>
         <button class="fluent-btn" @click="rebuildIndex" :disabled="loading || rebuildingIndex">
-          {{ rebuildingIndex ? '重建索引中...' : '刷新索引' }}
+          {{ rebuildingIndex ? '同步中...' : '同步 Obsidian' }}
         </button>
         <button class="fluent-btn" @click="refreshCards" :disabled="loading || rebuildingIndex">
           {{ loading ? '加载中...' : '刷新' }}
@@ -16,7 +20,16 @@
       </div>
     </div>
 
-    <div class="kc-body">
+    <div class="kc-sync-strip">
+      <span class="kc-sync-path">{{ vaultPath || 'Obsidian Vault 未加载' }}</span>
+      <span>总文件 {{ knowledgeStats.total }}</span>
+      <span>KC {{ knowledgeStats.cards }}</span>
+      <span>MOC {{ knowledgeStats.mocs }}</span>
+      <span>HUB {{ knowledgeStats.hubs }}</span>
+      <span>最近同步 {{ lastSyncTime || '-' }}</span>
+    </div>
+
+    <div v-if="activeView === 'cards'" class="kc-body">
       <!-- Sidebar Filters -->
       <aside class="kc-sidebar">
         <!-- Search -->
@@ -158,6 +171,101 @@
       </div>
     </div>
 
+    <div v-else class="kc-network-view">
+      <aside class="kc-network-sidebar">
+        <input
+          v-model="graphSearchText"
+          class="fluent-input kc-search"
+          placeholder="搜索节点、标签、摘要..."
+        />
+        <div class="kc-filter-section">
+          <div class="kc-filter-title">展开</div>
+          <div class="kc-graph-expand-actions">
+            <button class="fluent-btn" @click="expandGraphOneLevel">展开一级</button>
+            <button class="fluent-btn" @click="expandAllGraph">全部展开</button>
+            <button class="fluent-btn" @click="collapseGraphToEntry">收起</button>
+          </div>
+        </div>
+        <div class="kc-filter-section">
+          <div class="kc-filter-title">节点类型</div>
+          <button
+            v-for="type in graphTypeOptions"
+            :key="type.key"
+            class="kc-graph-type-btn"
+            :class="{ active: activeGraphTypes.has(type.key) }"
+            @click="toggleGraphType(type.key)"
+          >
+            <span class="kc-graph-type-dot" :style="{ background: graphTypeColor(type.key) }"></span>
+            {{ type.label }} ({{ graphTypeCounts[type.key] || 0 }})
+          </button>
+        </div>
+        <div class="kc-stats-panel">
+          <div class="kc-stat-row">
+            <span class="kc-stat-label">显示节点</span>
+            <span class="kc-stat-value">{{ visibleGraphNodes.length }}</span>
+          </div>
+          <div class="kc-stat-row">
+            <span class="kc-stat-label">显示关系</span>
+            <span class="kc-stat-value">{{ visibleGraphEdges.length }}</span>
+          </div>
+          <div class="kc-stat-row">
+            <span class="kc-stat-label">缺失链接</span>
+            <span class="kc-stat-value">{{ missingGraphEdges }}</span>
+          </div>
+        </div>
+        <button class="fluent-btn" style="width:100%;" @click="resetGraphViewport">重置视图</button>
+      </aside>
+
+      <div
+        class="kc-network-canvas"
+        :class="{ dragging: graphDragging }"
+        @mousedown="startGraphPan"
+        @mousemove="moveGraphPan"
+        @mouseup="endGraphPan"
+        @mouseleave="endGraphPan"
+        @wheel.prevent="onGraphWheel"
+      >
+        <div v-if="graphLoading" class="kc-network-loading">正在同步知识网络...</div>
+        <svg v-else class="kc-network-svg">
+          <g :transform="graphTransform">
+            <line
+              v-for="edge in visibleGraphEdges"
+              :key="`${edge.source}-${edge.target}`"
+              class="kc-graph-edge"
+              :class="{ missing: edge.missing }"
+              :x1="graphNodePositions[edge.source]?.x"
+              :y1="graphNodePositions[edge.source]?.y"
+              :x2="graphNodePositions[edge.target]?.x"
+              :y2="graphNodePositions[edge.target]?.y"
+            />
+            <g
+              v-for="node in visibleGraphNodes"
+              :key="node.id"
+              class="kc-graph-node"
+              :class="[`type-${node.type}`]"
+              :transform="`translate(${graphNodePositions[node.id]?.x || 0}, ${graphNodePositions[node.id]?.y || 0})`"
+              @mousedown.stop
+            >
+              <circle
+                :r="graphNodeRadius(node)"
+                :fill="graphTypeColor(node.type)"
+                @click.stop="toggleGraphNode(node)"
+              />
+              <text
+                v-if="hasGraphChildren(node.id)"
+                class="kc-graph-node-expander"
+                text-anchor="middle"
+                dominant-baseline="middle"
+                @click.stop="toggleGraphNode(node)"
+              >{{ expandedGraphNodeIds.has(node.id) ? '−' : '+' }}</text>
+              <text class="kc-graph-node-title" :x="graphNodeRadius(node) + 10" y="-3" @click.stop="openGraphNode(node)">{{ node.title }}</text>
+              <text class="kc-graph-node-meta" :x="graphNodeRadius(node) + 10" y="15" @click.stop="openGraphNode(node)">{{ node.id }}</text>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </div>
+
     <!-- Create Modal -->
     <Teleport to="body">
       <div v-if="createModalVisible" class="kc-modal-overlay" @click.self="closeCreateModal">
@@ -199,20 +307,20 @@
             <span class="kc-card-date">{{ selectedCard.date }}</span>
             <span v-if="selectedCard.source" class="kc-modal-source">Source: {{ selectedCard.source }}</span>
             <button
-              v-if="!editingCard"
+              v-if="selectedIsCard && !editingCard"
               class="fluent-btn kc-edit-btn"
               style="margin-left: auto;"
               @click="startEditCard"
             >
               Edit
             </button>
-            <template v-else>
+            <template v-else-if="selectedIsCard">
               <button class="fluent-btn kc-edit-btn" style="margin-left: auto;" @click="cancelEditCard" :disabled="savingCardEdit">Cancel</button>
               <button class="fluent-btn primary kc-edit-btn" @click="saveCardEdit" :disabled="savingCardEdit">
                 {{ savingCardEdit ? 'Saving...' : 'Save' }}
               </button>
             </template>
-            <button class="fluent-btn danger kc-delete-btn" @click="confirmDeleteCard" :disabled="deleting">
+            <button v-if="selectedIsCard" class="fluent-btn danger kc-delete-btn" @click="confirmDeleteCard" :disabled="deleting">
               {{ deleting ? 'Deleting...' : 'Delete' }}
             </button>
           </div>
@@ -328,7 +436,7 @@
           <button class="kc-modal-close" @click="closeImportModal">×</button>
           <h2 class="kc-modal-title">📁 文件导入与序号整理</h2>
           <p class="kc-create-hint">
-            支持拖入 .md 文件、选择单个文件或选择整个文件夹导入。推算当天的最新卡片序号，<strong>自动处理卡片 ID</strong>，最后同步上传到云端系统。
+            支持拖入 .md 文件、选择单个文件或选择整个文件夹导入。推算当天的最新卡片序号，<strong>自动处理卡片 ID</strong>，最后写入 Obsidian 卡片目录。
           </p>
 
           <div v-if="hasDirectoryPickerAPI" class="kc-default-import-box">
@@ -360,13 +468,13 @@
             </div>
             <div v-if="defaultImportDirConfigured" class="kc-default-import-actions">
               <button class="fluent-btn primary" :disabled="importSubmitting" @click="runWithDefaultImportDirectory('full-import')">
-                {{ importSubmitting ? '处理中...' : '📂 导入默认文件夹' }}
+                {{ importSubmitting ? '处理中...' : '导入默认文件夹' }}
               </button>
               <button class="fluent-btn" :disabled="importSubmitting" @click="runWithDefaultImportDirectory('all-missing')">
-                {{ importSubmitting ? '处理中...' : '只刷默认目录（全部）' }}
+                {{ importSubmitting ? '处理中...' : '同步默认目录（全部）' }}
               </button>
               <button class="fluent-btn" :disabled="importSubmitting" @click="runWithDefaultImportDirectory('today-missing')">
-                {{ importSubmitting ? '处理中...' : '只刷默认目录（今天）' }}
+                {{ importSubmitting ? '处理中...' : '同步默认目录（今天）' }}
               </button>
             </div>
           </div>
@@ -411,7 +519,7 @@
 
           <label class="kc-create-overwrite">
             <input v-model="importAllowOverwrite" type="checkbox" />
-            冲突时覆盖云端数据 (若不勾选，则为本地冲突文件分配全新的序号并重命名)
+            冲突时覆盖 Obsidian 目录中的同名卡片 (若不勾选，则为本地冲突文件分配全新的序号并重命名)
           </label>
           <div v-if="importError" class="kc-create-error">{{ importError }}</div>
 
@@ -441,7 +549,7 @@
           </div>
 
           <p v-if="!hasDirectoryPickerAPI" class="kc-create-hint" style="color: #f0ad4e; font-size: 0.85em; margin-top: 8px;">
-            ⚠️ 当前浏览器不支持目录读写 API，将使用兼容模式：可正常导入云端，但无法自动重命名本地文件。
+            当前浏览器不支持目录读写 API，将使用兼容模式：可正常写入 Obsidian 卡片目录，但无法自动重命名本地文件。
           </p>
           <!-- Hidden fallback input for browsers without showDirectoryPicker -->
           <input
@@ -469,14 +577,14 @@
               :disabled="importSubmitting"
               @click="quickSyncMissingCards('all-missing')"
             >
-              {{ importSubmitting ? '刷新中...' : '只刷未入库（全部）' }}
+              {{ importSubmitting ? '刷新中...' : '同步缺失卡片（全部）' }}
             </button>
             <button
               class="fluent-btn"
               :disabled="importSubmitting"
               @click="quickSyncMissingCards('today-missing')"
             >
-              {{ importSubmitting ? '刷新中...' : '只刷今天未入库' }}
+              {{ importSubmitting ? '刷新中...' : '同步今天缺失卡片' }}
             </button>
             <button class="fluent-btn" :disabled="importSubmitting" @click="fileInputRef?.click()">
               {{ importSubmitting ? '处理中...' : '📄 选择文件' }}
@@ -503,6 +611,37 @@ interface KnowledgeCard {
   tags: string[]
   summary: string
   source?: string
+  path?: string
+}
+
+type KnowledgeNodeType = 'map' | 'moc' | 'hub' | 'card' | 'note' | 'missing'
+
+interface KnowledgeGraphNode {
+  id: string
+  title: string
+  type: KnowledgeNodeType
+  domain: string
+  date: string
+  tags: string[]
+  summary: string
+  source?: string
+  path?: string
+  difficulty?: number
+}
+
+interface KnowledgeGraphEdge {
+  source: string
+  target: string
+  label?: string
+  missing?: boolean
+}
+
+interface KnowledgeStats {
+  total: number
+  cards: number
+  mocs: number
+  hubs: number
+  maps: number
 }
 
 type QuickSyncMode = 'all-missing' | 'today-missing'
@@ -513,6 +652,10 @@ const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
 const cards = ref<KnowledgeCard[]>([])
 const loading = ref(false)
 const rebuildingIndex = ref(false)
+const activeView = ref<'cards' | 'graph'>('cards')
+const vaultPath = ref('')
+const lastSyncTime = ref('')
+const knowledgeStats = ref<KnowledgeStats>({ total: 0, cards: 0, mocs: 0, hubs: 0, maps: 0 })
 const domainCollapsed = ref(true)
 const searchText = ref('')
 const activeDomains = ref(new Set<string>())
@@ -557,6 +700,7 @@ watch(dateTabMode, () => {
 const activeTags = ref(new Set<string>())
 
 const selectedCard = ref<KnowledgeCard | null>(null)
+const selectedIsCard = computed(() => Boolean(selectedCard.value && CARD_ID_PATTERN.test(selectedCard.value.id)))
 const cardContentHtml = ref('')
 const cardContentLoading = ref(false)
 const cardRawMarkdown = ref('')
@@ -569,6 +713,25 @@ const newCardMarkdown = ref('')
 const createSubmitting = ref(false)
 const createCardError = ref('')
 const createAllowOverwrite = ref(false)
+
+const graphLoading = ref(false)
+const graphNodes = ref<KnowledgeGraphNode[]>([])
+const graphEdges = ref<KnowledgeGraphEdge[]>([])
+const graphSearchText = ref('')
+const graphEntryId = ref('00-知识体系总图')
+const expandedGraphNodeIds = ref(new Set<string>())
+const activeGraphTypes = ref(new Set<KnowledgeNodeType>(['map', 'moc', 'hub', 'card', 'note']))
+const graphScale = ref(0.82)
+const graphOffset = ref({ x: 90, y: 430 })
+const graphDragging = ref(false)
+const graphDragStart = ref({ x: 0, y: 0, offsetX: 0, offsetY: 0 })
+const graphTypeOptions: { key: KnowledgeNodeType; label: string }[] = [
+  { key: 'map', label: '总图' },
+  { key: 'moc', label: 'MOC' },
+  { key: 'hub', label: 'HUB' },
+  { key: 'card', label: 'KC' },
+  { key: 'note', label: '笔记' },
+]
 
 // Delete state
 const deleting = ref(false)
@@ -804,6 +967,115 @@ const filteredCards = computed(() => {
   })
 })
 
+const graphTypeCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const node of graphNodes.value) {
+    counts[node.type] = (counts[node.type] || 0) + 1
+  }
+  return counts
+})
+
+const graphNodeById = computed(() => {
+  const map = new Map<string, KnowledgeGraphNode>()
+  for (const node of graphNodes.value) {
+    map.set(node.id, node)
+  }
+  return map
+})
+
+const graphChildrenById = computed(() => {
+  const map = new Map<string, string[]>()
+  for (const edge of graphEdges.value) {
+    if (edge.missing) continue
+    if (!map.has(edge.source)) map.set(edge.source, [])
+    map.get(edge.source)!.push(edge.target)
+  }
+  return map
+})
+
+const expandedReachableGraphIds = computed(() => {
+  const visibleIds = new Set<string>()
+  const entryId = graphEntryId.value
+  if (!entryId || !graphNodeById.value.has(entryId)) return visibleIds
+
+  const queue = [entryId]
+  visibleIds.add(entryId)
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current || !expandedGraphNodeIds.value.has(current)) continue
+
+    for (const childId of graphChildrenById.value.get(current) || []) {
+      if (visibleIds.has(childId)) continue
+      visibleIds.add(childId)
+      queue.push(childId)
+    }
+  }
+
+  return visibleIds
+})
+
+const visibleGraphNodes = computed(() => {
+  const needle = graphSearchText.value.trim().toLowerCase()
+  return graphNodes.value.filter(node => {
+    if (!needle && !expandedReachableGraphIds.value.has(node.id)) return false
+    if (!activeGraphTypes.value.has(node.type)) return false
+    if (!needle) return true
+    const searchable = `${node.id} ${node.title} ${node.domain} ${(node.tags || []).join(' ')} ${node.summary || ''}`.toLowerCase()
+    return searchable.includes(needle)
+  })
+})
+
+const visibleGraphNodeIds = computed(() => new Set(visibleGraphNodes.value.map(node => node.id)))
+
+const visibleGraphEdges = computed(() => {
+  return graphEdges.value.filter(edge => {
+    return !edge.missing && visibleGraphNodeIds.value.has(edge.source) && visibleGraphNodeIds.value.has(edge.target)
+  })
+})
+
+const missingGraphEdges = computed(() => graphEdges.value.filter(edge => edge.missing).length)
+
+const graphNodePositions = computed(() => {
+  const columns: Record<string, KnowledgeGraphNode[]> = {
+    map: [],
+    moc: [],
+    hub: [],
+    note: [],
+    card: [],
+  }
+
+  for (const node of visibleGraphNodes.value) {
+    const key = node.type === 'map' || node.type === 'moc' || node.type === 'hub' || node.type === 'note' ? node.type : 'card'
+    columns[key]?.push(node)
+  }
+
+  const xByType: Record<string, number> = {
+    map: 80,
+    moc: 360,
+    hub: 670,
+    note: 970,
+    card: 970,
+  }
+  const positions: Record<string, { x: number; y: number }> = {}
+
+  for (const [type, nodes] of Object.entries(columns)) {
+    nodes.sort((a, b) => a.id.localeCompare(b.id, 'zh-CN'))
+    const spacing = type === 'card' ? 58 : 86
+    const startY = -((nodes.length - 1) * spacing) / 2
+    nodes.forEach((node, index) => {
+      positions[node.id] = {
+        x: xByType[type] ?? 970,
+        y: startY + index * spacing,
+      }
+    })
+  }
+
+  return positions
+})
+
+const graphTransform = computed(() => `translate(${graphOffset.value.x} ${graphOffset.value.y}) scale(${graphScale.value})`)
+
 // Toggle filters
 function toggleDomain(domain: string) {
   const s = new Set(activeDomains.value)
@@ -818,9 +1090,8 @@ function toggleDifficulty(d: number) {
 }
 
 function toggleDateKey(key: string) {
-  const s = new Set(activeDateKeys.value)
-  if (s.has(key)) s.delete(key); else s.add(key)
-  activeDateKeys.value = s
+  // 日期维度是互斥筛选：同一时间只允许选中一个日/周/月/年，避免窄侧栏里多项叠加后状态难读。
+  activeDateKeys.value = activeDateKeys.value.has(key) ? new Set() : new Set([key])
 }
 
 function toggleTag(tag: string) {
@@ -837,12 +1108,171 @@ function resetFilters() {
   activeTags.value = new Set()
 }
 
+function graphTypeColor(type: KnowledgeNodeType): string {
+  switch (type) {
+    case 'map': return '#60CDFF'
+    case 'moc': return '#8BD17C'
+    case 'hub': return '#F2C94C'
+    case 'card': return '#A29BFE'
+    case 'note': return '#B0BEC5'
+    default: return '#737373'
+  }
+}
+
+function graphNodeRadius(node: KnowledgeGraphNode) {
+  if (node.type === 'map') return 18
+  if (node.type === 'moc') return 14
+  if (node.type === 'hub') return 12
+  return 8
+}
+
+function hasGraphChildren(nodeId: string) {
+  return (graphChildrenById.value.get(nodeId) || []).length > 0
+}
+
+function toggleGraphNode(node: KnowledgeGraphNode) {
+  if (!hasGraphChildren(node.id)) {
+    void openGraphNode(node)
+    return
+  }
+
+  const next = new Set(expandedGraphNodeIds.value)
+  if (next.has(node.id)) {
+    next.delete(node.id)
+  } else {
+    next.add(node.id)
+  }
+  expandedGraphNodeIds.value = next
+}
+
+function collapseGraphToEntry() {
+  expandedGraphNodeIds.value = new Set([graphEntryId.value])
+  resetGraphViewport()
+}
+
+function expandGraphOneLevel() {
+  const next = new Set(expandedGraphNodeIds.value)
+  for (const id of expandedReachableGraphIds.value) {
+    if (hasGraphChildren(id)) next.add(id)
+  }
+  expandedGraphNodeIds.value = next
+}
+
+function expandAllGraph() {
+  const next = new Set<string>()
+  for (const node of graphNodes.value) {
+    if (hasGraphChildren(node.id)) next.add(node.id)
+  }
+  expandedGraphNodeIds.value = next
+}
+
+function toggleGraphType(type: KnowledgeNodeType) {
+  const next = new Set(activeGraphTypes.value)
+  if (next.has(type)) {
+    next.delete(type)
+  } else {
+    next.add(type)
+  }
+  activeGraphTypes.value = next
+}
+
+function resetGraphViewport() {
+  graphScale.value = 0.82
+  graphOffset.value = { x: 90, y: 430 }
+}
+
+function startGraphPan(event: MouseEvent) {
+  graphDragging.value = true
+  graphDragStart.value = {
+    x: event.clientX,
+    y: event.clientY,
+    offsetX: graphOffset.value.x,
+    offsetY: graphOffset.value.y,
+  }
+}
+
+function moveGraphPan(event: MouseEvent) {
+  if (!graphDragging.value) return
+  graphOffset.value = {
+    x: graphDragStart.value.offsetX + event.clientX - graphDragStart.value.x,
+    y: graphDragStart.value.offsetY + event.clientY - graphDragStart.value.y,
+  }
+}
+
+function endGraphPan() {
+  graphDragging.value = false
+}
+
+function onGraphWheel(event: WheelEvent) {
+  const next = Math.min(1.8, Math.max(0.35, graphScale.value + (event.deltaY > 0 ? -0.08 : 0.08)))
+  graphScale.value = Number(next.toFixed(2))
+}
+
+async function refreshGraph() {
+  graphLoading.value = true
+  try {
+    const data = await $fetch<{
+      nodes: KnowledgeGraphNode[]
+      edges: KnowledgeGraphEdge[]
+      entryId: string
+      vaultPath: string
+      updated_at: string
+      stats: KnowledgeStats
+    }>('/api/knowledge/graph')
+    graphNodes.value = data.nodes || []
+    graphEdges.value = data.edges || []
+    graphEntryId.value = data.entryId || graphEntryId.value
+    if (expandedGraphNodeIds.value.size === 0) {
+      expandedGraphNodeIds.value = new Set([graphEntryId.value])
+    }
+    vaultPath.value = data.vaultPath || vaultPath.value
+    lastSyncTime.value = data.updated_at || lastSyncTime.value
+    if (data.stats) knowledgeStats.value = data.stats
+  } catch (e) {
+    console.error('Failed to load knowledge graph:', e)
+    graphNodes.value = []
+    graphEdges.value = []
+  } finally {
+    graphLoading.value = false
+  }
+}
+
+async function showGraphView() {
+  activeView.value = 'graph'
+  if (graphNodes.value.length === 0) {
+    await refreshGraph()
+  }
+}
+
+async function openGraphNode(node: KnowledgeGraphNode) {
+  const cardLike: KnowledgeCard = {
+    id: node.id,
+    title: node.title,
+    domain: node.domain,
+    difficulty: node.difficulty || 1,
+    date: node.date,
+    tags: node.tags || [],
+    summary: node.summary,
+    source: node.source,
+    path: node.path,
+  }
+  await openCard(cardLike)
+}
+
 // Fetch cards
 async function refreshCards() {
   loading.value = true
   try {
-    const data = await $fetch<{ cards: KnowledgeCard[] }>('/api/knowledge')
+    const data = await $fetch<{
+      cards: KnowledgeCard[]
+      vaultPath: string
+      updated_at: string
+      stats: KnowledgeStats
+    }>('/api/knowledge')
     cards.value = data.cards || []
+    vaultPath.value = data.vaultPath || ''
+    lastSyncTime.value = data.updated_at || ''
+    if (data.stats) knowledgeStats.value = data.stats
     syncDefaultDateSelection()
   } catch (e) {
     console.error('Failed to load cards:', e)
@@ -858,6 +1288,9 @@ async function rebuildIndex() {
   try {
     await $fetch('/api/knowledge/rebuild', { method: 'POST' })
     await refreshCards()
+    if (activeView.value === 'graph') {
+      await refreshGraph()
+    }
   } catch (e) {
     console.error('Failed to rebuild knowledge index:', e)
   } finally {
@@ -895,6 +1328,7 @@ async function submitCreateCard() {
     })
 
     await refreshCards()
+    if (activeView.value === 'graph') await refreshGraph()
     closeCreateModal()
     newCardMarkdown.value = ''
     createAllowOverwrite.value = false
@@ -921,7 +1355,7 @@ async function openCard(card: KnowledgeCard) {
   cardContentLoading.value = true
 
   try {
-    const data = await $fetch<{ markdown: string }>(`/api/knowledge/${card.id}`)
+    const data = await $fetch<{ markdown: string }>(`/api/knowledge/${encodeURIComponent(card.id)}`)
     cardRawMarkdown.value = data.markdown || ''
     cardContentHtml.value = markdownToHtml(data.markdown)
   } catch {
@@ -967,7 +1401,7 @@ async function saveCardEdit() {
   editCardError.value = ''
 
   try {
-    const data = await $fetch<{ markdown: string }>(`/api/knowledge/${card.id}`, {
+    const data = await $fetch<{ markdown: string }>(`/api/knowledge/${encodeURIComponent(card.id)}`, {
       method: 'PUT',
       body: {
         markdown,
@@ -980,6 +1414,7 @@ async function saveCardEdit() {
     editingCard.value = false
 
     await refreshCards()
+    if (activeView.value === 'graph') await refreshGraph()
     const latest = cards.value.find(item => item.id === card.id)
     if (latest) {
       selectedCard.value = latest
@@ -1009,11 +1444,12 @@ async function executeDelete() {
 
   deleting.value = true
   try {
-    await $fetch(`/api/knowledge/${card.id}`, { method: 'DELETE' })
+    await $fetch(`/api/knowledge/${encodeURIComponent(card.id)}`, { method: 'DELETE' })
     deleteConfirmVisible.value = false
     deleteTargetCard.value = null
     selectedCard.value = null
     await refreshCards()
+    if (activeView.value === 'graph') await refreshGraph()
   } catch (e: any) {
     console.error('Failed to delete card:', e)
     alert(e?.data?.statusMessage || e?.message || '删除失败')
@@ -1110,6 +1546,7 @@ async function executeDeduplicateDelete() {
     selectedDuplicateIds.value = new Set()
 
     await refreshCards()
+    if (activeView.value === 'graph') await refreshGraph()
   } catch (e: any) {
     deduplicateError.value = e?.data?.statusMessage || e?.message || '删除失败'
   } finally {
@@ -1131,9 +1568,9 @@ function extractCardIdFromMarkdown(filename: string, content: string) {
 
   let idFromMeta = ''
   if (match) {
-    const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+    const idMatch = (match[1] || '').match(/^id\s*:\s*(.+)$/m)
     if (idMatch) {
-      idFromMeta = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+      idFromMeta = (idMatch[1] || '').trim().replace(/^['"]|['"]$/g, '')
     }
   }
 
@@ -1326,7 +1763,8 @@ async function collectMdFilesFromDirectoryHandle(dirHandle: any) {
 async function collectMdFilesFromFileList(files: FileList) {
   const items: { filename: string; content: string }[] = []
   for (let i = 0; i < files.length; i++) {
-    const file = files[i]
+    const file = files.item(i)
+    if (!file) continue
     if (!file.name.toLowerCase().endsWith('.md')) continue
     items.push({ filename: file.name, content: await file.text() })
   }
@@ -1435,7 +1873,7 @@ async function syncMissingCardsFromLocalFiles(
         status: 'skipped',
         id,
         filename: localFile.filename,
-        message: '卡片已在数据库中，已跳过',
+        message: '卡片已在 Obsidian 目录中，已跳过',
       })
       continue
     }
@@ -1642,7 +2080,7 @@ async function handleFolderInputChange(event: Event) {
     const dd = String(dDate.getDate()).padStart(2, '0')
     const prefix = `KC-${yyyy}-${MM}-${dd}-`
 
-    // 获取云端卡片列表
+    // 获取 Obsidian 目录中的卡片列表，用于分配不冲突的新 ID。
     const indexData = await $fetch<{ version: number, cards: any[] }>('/api/knowledge')
     const existingIds = new Set(indexData.cards?.map(c => c.id) || [])
 
@@ -1661,7 +2099,8 @@ async function handleFolderInputChange(event: Event) {
     const resultsPreview: { status: string, filename: string, message: string, id: string }[] = []
 
     for (let i = 0; i < files.length; i++) {
-      const file = files[i]
+      const file = files.item(i)
+      if (!file) continue
       if (!file.name.toLowerCase().endsWith('.md')) continue
 
       const content = await file.text()
@@ -1670,9 +2109,9 @@ async function handleFolderInputChange(event: Event) {
 
       let existingFileId = ''
       if (match) {
-        const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+        const idMatch = (match[1] || '').match(/^id\s*:\s*(.+)$/m)
         if (idMatch) {
-          existingFileId = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+          existingFileId = (idMatch[1] || '').trim().replace(/^['"]|['"]$/g, '')
         }
       }
 
@@ -1695,8 +2134,8 @@ async function handleFolderInputChange(event: Event) {
       if (!match) {
         newContent = `---\nid: ${chosenId}\ntitle: ${baseNameId}\n---\n\n${normalized}`
       } else {
-        const fmContent = match[1]
-        const body = match[2]
+        const fmContent = match[1] || ''
+        const body = match[2] || ''
         let newFm = fmContent
         if (/^id\s*:/m.test(fmContent)) {
           newFm = fmContent.replace(/^id\s*:.*$/m, `id: ${chosenId}`)
@@ -1742,8 +2181,9 @@ async function onDropFiles(e: DragEvent) {
   const rawFiles: File[] = []
   if (dt.items && dt.items.length > 0) {
     for (let i = 0; i < dt.items.length; i++) {
-      if (dt.items[i].kind === 'file') {
-        const f = dt.items[i].getAsFile()
+      const item = dt.items[i]
+      if (item && item.kind === 'file') {
+        const f = item.getAsFile()
         if (f) rawFiles.push(f)
       }
     }
@@ -1803,7 +2243,8 @@ async function handleFileInputChange(event: Event) {
   try {
     const mdFiles: { filename: string; content: string }[] = []
     for (let i = 0; i < files.length; i++) {
-      const file = files[i]
+      const file = files.item(i)
+      if (!file) continue
       if (file.name.toLowerCase().endsWith('.md')) {
         mdFiles.push({ filename: file.name, content: await file.text() })
       }
@@ -1832,7 +2273,7 @@ async function importFilesFromList(mdFiles: { filename: string; content: string 
   for (const id of existingIds) {
     if (id.startsWith(prefix)) {
       const parts = id.split('-')
-      const seq = parseInt(parts[parts.length - 1], 10)
+      const seq = parseInt(parts[parts.length - 1] || '', 10)
       if (!isNaN(seq) && seq > maxSeq) {
         maxSeq = seq
       }
@@ -1850,9 +2291,9 @@ async function importFilesFromList(mdFiles: { filename: string; content: string 
 
     let existingFileId = ''
     if (match) {
-      const idMatch = match[1].match(/^id\s*:\s*(.+)$/m)
+      const idMatch = (match[1] || '').match(/^id\s*:\s*(.+)$/m)
       if (idMatch) {
-        existingFileId = idMatch[1].trim().replace(/^['"]|['"]$/g, '')
+        existingFileId = (idMatch[1] || '').trim().replace(/^['"]|['"]$/g, '')
       }
     }
 
@@ -1872,8 +2313,8 @@ async function importFilesFromList(mdFiles: { filename: string; content: string 
     if (!match) {
       newContent = `---\nid: ${chosenId}\ntitle: ${baseNameId}\n---\n\n${normalized}`
     } else {
-      const fmContent = match[1]
-      const body = match[2]
+      const fmContent = match[1] || ''
+      const body = match[2] || ''
       let newFm = fmContent
       if (/^id\s*:/m.test(fmContent)) {
         newFm = fmContent.replace(/^id\s*:.*$/m, `id: ${chosenId}`)
@@ -1890,7 +2331,7 @@ async function importFilesFromList(mdFiles: { filename: string; content: string 
   await uploadFilePayloads(filePayloads, resultsPreview)
 }
 
-// 公共：上传文件到云端
+// 公共：把浏览器选中的 Markdown 写入服务端配置的 Obsidian 卡片目录。
 async function uploadFilePayloads(
   filePayloads: { filename: string, content: string }[],
   resultsPreview: { status: string, filename: string, message: string, id: string }[],
@@ -1934,6 +2375,7 @@ async function uploadFilePayloads(
 
     if ((data.imported || 0) > 0) {
       await refreshCards()
+      if (activeView.value === 'graph') await refreshGraph()
     }
   } else {
     importResults.value = resultsPreview
@@ -1964,6 +2406,14 @@ function renderExternalLink(url: string, label?: string): string {
   if (!normalized) return safeLabel
   const safeUrl = escapeHtml(normalized)
   return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`
+}
+
+function renderKnowledgeImage(rawPath: string, alt = ''): string {
+  const trimmed = rawPath.trim()
+  if (!trimmed) return ''
+  const isRemote = /^(https?:)?\/\//i.test(trimmed) || /^data:/i.test(trimmed)
+  const src = isRemote ? trimmed : `/api/knowledge/asset?file=${encodeURIComponent(trimmed)}`
+  return `<img class="kc-md-image" src="${escapeHtml(src)}" alt="${escapeHtml(alt || trimmed)}" loading="lazy" />`
 }
 
 function linkifyPlainUrls(text: string): string {
@@ -2011,6 +2461,8 @@ function markdownToHtml(md: string): string {
     return token
   })
 
+  html = html.replace(/!\[\[([^\]]+)\]\]/g, (_m, path) => renderKnowledgeImage(path))
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt, path) => renderKnowledgeImage(path, alt))
   html = html.replace(/^### (.+)$/gm, (_m, title) => `<h4>${renderInlineMarkdown(title)}</h4>`)
   html = html.replace(/^## (.+)$/gm, (_m, title) => `<h3>${renderInlineMarkdown(title)}</h3>`)
   html = html.replace(/^# (.+)$/gm, (_m, title) => `<h2>${renderInlineMarkdown(title)}</h2>`)
@@ -2076,9 +2528,195 @@ onMounted(() => {
   min-height: 0;
 }
 
+.kc-sync-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 34px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  background: rgba(255,255,255,0.025);
+}
+
+.kc-sync-path {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.kc-view-switch {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--control-stroke);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+}
+
+.kc-view-btn {
+  min-width: 46px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-tertiary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kc-view-btn.active {
+  color: var(--accent-default);
+  background: rgba(96, 205, 255, 0.16);
+}
+
+.kc-network-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kc-network-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--bg-nav);
+  border-right: 1px solid var(--divider);
+}
+
+.kc-graph-type-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.04);
+  cursor: pointer;
+  text-align: left;
+}
+
+.kc-graph-type-btn.active {
+  color: var(--text-primary);
+  border-color: rgba(96, 205, 255, 0.35);
+  background: rgba(96, 205, 255, 0.1);
+}
+
+.kc-graph-expand-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.kc-graph-expand-actions .fluent-btn {
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.kc-graph-type-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.kc-network-canvas {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  cursor: grab;
+  background:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+    #181818;
+  background-size: 28px 28px;
+}
+
+.kc-network-canvas.dragging {
+  cursor: grabbing;
+}
+
+.kc-network-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.kc-network-loading {
+  position: absolute;
+  left: 24px;
+  top: 24px;
+  z-index: 1;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.kc-graph-edge {
+  stroke: rgba(180, 200, 220, 0.26);
+  stroke-width: 1.3;
+}
+
+.kc-graph-edge.missing {
+  stroke: rgba(240, 173, 78, 0.45);
+  stroke-dasharray: 6 5;
+}
+
+.kc-graph-node {
+  cursor: pointer;
+}
+
+.kc-graph-node circle {
+  stroke: rgba(255,255,255,0.82);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.35));
+}
+
+.kc-graph-node:hover circle {
+  stroke: #fff;
+  stroke-width: 2.2;
+}
+
+.kc-graph-node-title {
+  fill: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  paint-order: stroke;
+  stroke: #181818;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.kc-graph-node-meta {
+  fill: var(--text-tertiary);
+  font-size: 10px;
+  cursor: pointer;
+  paint-order: stroke;
+  stroke: #181818;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.kc-graph-node-expander {
+  fill: #111;
+  font-size: 13px;
+  font-weight: 800;
+  pointer-events: all;
+  user-select: none;
+}
+
 /* Sidebar */
 .kc-sidebar {
-  width: 260px;
+  width: 330px;
   background: var(--bg-nav);
   border-right: 1px solid var(--divider);
   padding: 16px;
@@ -2224,17 +2862,17 @@ onMounted(() => {
   padding-right: 2px;
 }
 .kc-date-item {
-  padding: 4px 8px;
+  padding: 5px 9px;
   border-radius: var(--radius-sm);
   font-size: 12px;
+  line-height: 1.35;
   background: rgba(255,255,255,0.05);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s;
   border: 1px solid transparent;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .kc-date-item:hover { background: rgba(255,255,255,0.1); }
 .kc-date-item.active {
@@ -2592,6 +3230,16 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 12px;
   color: var(--accent-default);
+}
+.kc-modal-body :deep(.kc-md-image) {
+  display: block;
+  max-width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  margin: 12px 0;
+  border: 1px solid var(--control-stroke);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.03);
 }
 
 /* Delete button in detail modal */

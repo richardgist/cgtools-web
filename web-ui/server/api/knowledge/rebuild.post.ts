@@ -7,6 +7,9 @@ export default defineEventHandler(async () => {
     return {
       ok: true,
       cardsCount: index.cards.length,
+      stats: index.stats,
+      vaultPath: index.vaultPath,
+      updated_at: index.updated_at,
     }
   } catch (e: any) {
     throw createError({

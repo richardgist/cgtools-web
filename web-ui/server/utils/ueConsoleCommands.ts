@@ -1,10 +1,18 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import {
+  PROJECT_BUILT_IN_CONSOLE_COMMANDS,
+  PROJECT_BUILT_IN_CONSOLE_COMMAND_SOURCE,
+} from './builtInConsoleCommands'
 import { getScriptsDir } from './scriptRegistry'
 
 export type UeConsoleCommand = {
   name: string
   description: string
+  insertText?: string
+  category?: string
+  source?: string
+  aliases?: string[]
 }
 
 export type UeConsoleCommandSnapshot = {
@@ -98,6 +106,37 @@ export const parseConsoleCommandCsv = (content: string): UeConsoleCommand[] => {
   return result
 }
 
+export const mergeBuiltInConsoleCommands = (commands: UeConsoleCommand[]) => {
+  const result: UeConsoleCommand[] = []
+  const seen = new Set<string>()
+
+  for (const command of [...PROJECT_BUILT_IN_CONSOLE_COMMANDS, ...commands]) {
+    const name = command.name.trim()
+    const key = name.toLowerCase()
+    if (!name || seen.has(key)) continue
+
+    seen.add(key)
+    result.push({
+      ...command,
+      name,
+      description: command.description.trim(),
+      insertText: command.insertText,
+      aliases: command.aliases?.map((alias) => alias.trim()).filter(Boolean),
+    })
+  }
+
+  return result
+}
+
+const getSuggestionSearchFields = (command: UeConsoleCommand) => [
+  command.name,
+  command.insertText || '',
+  command.description,
+  command.category || '',
+  command.source || '',
+  ...(command.aliases || []),
+].map((field) => field.toLowerCase())
+
 export const filterConsoleCommandSuggestions = (
   commands: UeConsoleCommand[],
   prefix: string,
@@ -110,10 +149,10 @@ export const filterConsoleCommandSuggestions = (
   const contains: UeConsoleCommand[] = []
 
   for (const command of commands) {
-    const name = command.name.toLowerCase()
-    if (name.startsWith(normalizedPrefix)) {
+    const fields = getSuggestionSearchFields(command)
+    if (fields.some((field) => field.startsWith(normalizedPrefix))) {
       startsWith.push(command)
-    } else if (name.includes(normalizedPrefix)) {
+    } else if (fields.some((field) => field.includes(normalizedPrefix))) {
       contains.push(command)
     }
   }
@@ -142,7 +181,7 @@ export const getLatestConsoleCommandCsvPath = () => {
 export const loadLatestConsoleCommandSnapshot = (): UeConsoleCommandSnapshot => {
   const sourcePath = getLatestConsoleCommandCsvPath()
   if (!sourcePath) {
-    return { commands: [], sourcePath: '', updatedAt: 0 }
+    return { commands: mergeBuiltInConsoleCommands([]), sourcePath: PROJECT_BUILT_IN_CONSOLE_COMMAND_SOURCE, updatedAt: 0 }
   }
 
   return loadConsoleCommandSnapshotFromPath(sourcePath)
@@ -157,7 +196,7 @@ export const loadConsoleCommandSnapshotFromPath = (sourcePath: string): UeConsol
 
   const content = fs.readFileSync(sourcePath, 'utf-8')
   return {
-    commands: parseConsoleCommandCsv(content),
+    commands: mergeBuiltInConsoleCommands(parseConsoleCommandCsv(content)),
     sourcePath: resolvedPath,
     updatedAt: stat.mtimeMs,
   }

@@ -27,6 +27,27 @@
         </div>
       </NuxtLink>
 
+      <a href="/table-viewer" class="dashboard-card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+            <line x1="9" y1="4" x2="9" y2="20"></line>
+            <line x1="15" y1="4" x2="15" y2="20"></line>
+          </svg>
+        </div>
+        <div class="card-content">
+          <div class="card-title">配置表浏览器</div>
+          <div class="card-desc">直接打开 trunk/xls/table_viewer 的单文件配置表查看器</div>
+        </div>
+        <div class="card-action">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </div>
+      </a>
+
       <NuxtLink to="/claude" class="dashboard-card">
         <div class="card-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -82,6 +103,26 @@
         <div class="card-content">
           <div class="card-title">Android SO Tooling</div>
           <div class="card-desc">Build libUE4.so, replace into APK, and run AndroidInject flow with live logs.</div>
+        </div>
+        <div class="card-action">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </div>
+      </NuxtLink>
+
+      <NuxtLink to="/pak-tool" class="dashboard-card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path>
+            <path d="m3.3 7 8.7 5 8.7-5"></path>
+            <path d="M12 22V12"></path>
+          </svg>
+        </div>
+        <div class="card-content">
+          <div class="card-title">Pak Tool</div>
+          <div class="card-desc">启动 trunk 下的 PakToolPlus，并快速打开工具目录和输出目录</div>
         </div>
         <div class="card-action">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

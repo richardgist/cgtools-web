@@ -87,10 +87,14 @@ try {
   })
 
   assert.deepEqual(updatePlan.steps.map((step) => step.name), ['Update Assets (P4)', 'Update SVN'])
-  assert(updatePlan.preview.includes('p4 sync'))
   assert(updatePlan.preview.includes('svn update -r 1466919'))
-  assert(updatePlan.preview.includes('@5996891'))
   assert(updatePlan.preview.includes('5996991'))
+  assert.equal(updatePlan.steps[0]?.cmd, 'python')
+  assert(updatePlan.preview.includes('update-assets-p4.py'))
+  assert(updatePlan.preview.includes('--merged-p4-head 5996891'))
+  assert(updatePlan.preview.includes('--p4-merge-json'))
+  assert(!updatePlan.preview.includes('function Invoke-P4SyncMany'))
+  assert(!updatePlan.preview.includes('powershell.exe -NoProfile -ExecutionPolicy Bypass -File'))
 
   const fullBuildPlan = buildAndroidSoJobPlan('buildSo', {
     projectRoot: tempRoot,

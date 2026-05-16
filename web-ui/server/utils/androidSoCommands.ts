@@ -2,10 +2,11 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { spawnSync } from 'child_process'
+import { buildUpdateCodeAssetsPlan, type UpdateCodeAssetsPayload } from './versionUpdateCommands'
 
 export type AndroidArch = 'arm64-v8a' | 'armeabi-v7a' | 'x86_64'
 export type BuildConfig = 'Development' | 'Test' | 'Shipping'
-export type AndroidSoJobType = 'buildSo' | 'rebuildSo' | 'replaceA' | 'injectB' | 'pushSo'
+export type AndroidSoJobType = 'updateCodeAssets' | 'buildSo' | 'rebuildSo' | 'replaceA' | 'injectB' | 'pushSo'
 
 export interface BuildSoPayload {
   projectRoot: string
@@ -16,11 +17,6 @@ export interface BuildSoPayload {
   arch: AndroidArch
   logPath?: string
   maxParallelActions?: number
-  versionUpdateEnabled?: boolean
-  versionUpdateText?: string
-  svnUpdatePath?: string
-  p4SyncPaths?: string[]
-  p4Parallel?: boolean
 }
 
 export interface ReplaceAPayload {
@@ -46,7 +42,7 @@ export interface PushSoPayload {
   launchAfterPush?: boolean
 }
 
-export type AndroidSoPayload = BuildSoPayload | ReplaceAPayload | InjectBPayload | PushSoPayload
+export type AndroidSoPayload = UpdateCodeAssetsPayload | BuildSoPayload | ReplaceAPayload | InjectBPayload | PushSoPayload
 
 export interface CommandStep {
   name: string
@@ -70,13 +66,6 @@ export interface JobPlan {
   outputs: Record<string, string>
 }
 
-export interface BuildVersionUpdateInfo {
-  mergedP4Head: string
-  mergedSvnHead: string
-  p4Merge: string[]
-  svnMerge: string[]
-}
-
 const VALID_ARCHES = new Set<AndroidArch>(['arm64-v8a', 'armeabi-v7a', 'x86_64'])
 const VALID_CONFIGS = new Set<BuildConfig>(['Development', 'Test', 'Shipping'])
 const REPLACE_MANAGER_DIR = 'I:\\cgtools\\ReplaceManager\\RevertTool'
@@ -84,7 +73,6 @@ const REPLACE_MANAGER_SOURCE_DIR = path.dirname(REPLACE_MANAGER_DIR)
 const REPLACE_MANAGER_TOOL_PY = path.join(REPLACE_MANAGER_DIR, 'ReplaceManagerTool.py')
 const REPLACE_MANAGER_CONFIG_JSON = path.join(REPLACE_MANAGER_SOURCE_DIR, 'ReplaceConfig.json')
 const ANDROID_RUNTIME_SETTINGS_SECTION = '[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]'
-const SAFE_P4_CHILD_DIR_EXCLUDES = new Set(['.git', '.svn', 'Binaries', 'DerivedDataCache', 'Intermediate', 'Saved'])
 
 const quoteArg = (value: string) => {
   if (value.length === 0) return '""'
@@ -97,31 +85,6 @@ const renderCommand = (cmd: string, args: string[], cwd?: string) => {
     return commandLine
   }
   return `(cwd=${cwd}) ${commandLine}`
-}
-
-const quotePowerShell = (value: string) => `'${String(value).replace(/'/g, "''")}'`
-
-const extractBuildVersionNumber = (text: string, label: string) => {
-  const match = text.match(new RegExp(`${label}\\s*[:：]\\s*(\\d+)`, 'i'))
-  return match?.[1] || ''
-}
-
-const extractBuildVersionList = (text: string, label: string) => {
-  const match = text.match(new RegExp(`${label}\\s*[:：]\\s*([\\d\\s\\-－–—]+)`, 'i'))
-  return (match?.[1] || '')
-    .split(/[\s\-－–—]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-export const parseBuildVersionUpdateText = (text: string): BuildVersionUpdateInfo => {
-  const normalized = String(text || '').replace(/[，,]/g, ' ')
-  return {
-    mergedP4Head: extractBuildVersionNumber(normalized, 'MergedP4Head'),
-    mergedSvnHead: extractBuildVersionNumber(normalized, 'MergedSvnHead'),
-    p4Merge: extractBuildVersionList(normalized, 'P4Merge'),
-    svnMerge: extractBuildVersionList(normalized, 'SVNMerge'),
-  }
 }
 
 export const getDefaultEngineIniAndroidAbiSettings = (arch: AndroidArch) => ({
@@ -271,164 +234,6 @@ const buildAndroidSoOutputCandidates = (projectFile: string, config: BuildConfig
   return [...new Set(fileCandidates)]
 }
 
-const normalizeP4SyncPaths = (projectDir: string, projectRoot: string, requestedPaths?: string[]) => {
-  const explicitPaths = (requestedPaths || [])
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-    .map((item) => path.isAbsolute(item) ? item : path.join(projectRoot || '', item))
-
-  if (explicitPaths.length > 0) {
-    return [...new Set(explicitPaths.map((item) => path.normalize(item)))]
-  }
-
-  if (!fs.existsSync(projectDir)) {
-    return []
-  }
-
-  // P4 同步不能直接打到 Survive 这种工作区外层目录；默认拆成一层子目录，避开构建产物目录。
-  const childDirs = fs.readdirSync(projectDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !SAFE_P4_CHILD_DIR_EXCLUDES.has(entry.name))
-    .map((entry) => path.join(projectDir, entry.name))
-
-  return [...new Set(childDirs)]
-}
-
-const buildP4VersionSyncScript = (
-  versionInfo: BuildVersionUpdateInfo,
-  p4SyncPaths: string[],
-  useParallel: boolean,
-) => {
-  const targetList = p4SyncPaths.map(quotePowerShell).join(', ')
-  const changeList = versionInfo.p4Merge.map(quotePowerShell).join(', ')
-  const lines = [
-    '$ErrorActionPreference = "Stop"',
-    '$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()',
-    `$targets = @(${targetList})`,
-    `$singleChanges = @(${changeList})`,
-    `$useParallel = ${useParallel ? '$true' : '$false'}`,
-    'function Invoke-P4SyncMany([string[]] $Specs, [string] $Label) {',
-    '  if (-not $Specs -or $Specs.Count -eq 0) { return }',
-    '  Write-Host "[version] P4 $Label: $($Specs.Count) target(s)"',
-    '  if (-not $useParallel -or $Specs.Count -eq 1) {',
-    '    foreach ($spec in $Specs) {',
-    '      Write-Host "[version] p4 sync $spec"',
-    '      & p4 sync $spec',
-    '      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
-    '    }',
-    '    return',
-    '  }',
-    '  $jobs = foreach ($spec in $Specs) {',
-    '    Start-Job -ScriptBlock {',
-    '      param([string] $syncSpec)',
-    '      & p4 sync $syncSpec',
-    '      if ($LASTEXITCODE -ne 0) { throw "p4 sync failed with exitCode=$LASTEXITCODE: $syncSpec" }',
-    '    } -ArgumentList $spec',
-    '  }',
-    '  $jobs | Wait-Job | Out-Null',
-    '  $failed = $false',
-    '  foreach ($job in $jobs) {',
-    '    Receive-Job $job',
-    '    if ($job.State -ne "Completed") {',
-    '      $failed = $true',
-    '      Write-Error "[version] P4 sync job failed: $($job.Name)"',
-    '    }',
-    '  }',
-    '  $jobs | Remove-Job',
-    '  if ($failed) { exit 1 }',
-    '}',
-  ]
-
-  if (versionInfo.mergedP4Head) {
-    lines.push(
-      `$baseSpecs = $targets | ForEach-Object { "$_\...@${versionInfo.mergedP4Head}" }`,
-      `Invoke-P4SyncMany $baseSpecs "base @${versionInfo.mergedP4Head}"`,
-    )
-  }
-
-  lines.push(
-    'foreach ($change in $singleChanges) {',
-    '  $changeSpecs = $targets | ForEach-Object { "$_\...@=$change" }',
-    '  Invoke-P4SyncMany $changeSpecs "change @$change"',
-    '}',
-  )
-
-  return lines.join('; ')
-}
-
-const buildSvnVersionSyncScript = (versionInfo: BuildVersionUpdateInfo, svnUpdatePath: string) => {
-  const lines = [
-    '$ErrorActionPreference = "Stop"',
-    '$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()',
-    `$svnPath = ${quotePowerShell(svnUpdatePath)}`,
-    '$svnUrl = (& svn info --show-item url $svnPath)',
-    'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
-  ]
-
-  if (versionInfo.mergedSvnHead) {
-    lines.push(
-      `Write-Host "[version] SVN update $svnPath to r${versionInfo.mergedSvnHead}"`,
-      `& svn update -r ${versionInfo.mergedSvnHead} $svnPath --non-interactive`,
-      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
-    )
-  }
-
-  for (const revision of versionInfo.svnMerge) {
-    lines.push(
-      `Write-Host "[version] SVN merge -c ${revision} from $svnUrl"`,
-      `& svn merge -c ${revision} $svnUrl $svnPath --non-interactive --accept postpone`,
-      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
-    )
-  }
-
-  return lines.join('; ')
-}
-
-const buildVersionUpdateSteps = (payload: BuildSoPayload, projectDir: string, errors: string[], warnings: string[]) => {
-  if (!payload.versionUpdateEnabled) {
-    return []
-  }
-
-  const versionInfo = parseBuildVersionUpdateText(payload.versionUpdateText || '')
-  const hasAnyVersion = !!(versionInfo.mergedP4Head || versionInfo.mergedSvnHead || versionInfo.p4Merge.length || versionInfo.svnMerge.length)
-  addValidation(errors, hasAnyVersion, 'Version update text did not contain MergedP4Head/MergedSvnHead/P4Merge/SVNMerge.')
-
-  const svnUpdatePath = (payload.svnUpdatePath || '').trim() || projectDir
-  const p4SyncPaths = normalizeP4SyncPaths(projectDir, payload.projectRoot, payload.p4SyncPaths)
-  const needsSvn = !!(versionInfo.mergedSvnHead || versionInfo.svnMerge.length)
-  const needsP4 = !!(versionInfo.mergedP4Head || versionInfo.p4Merge.length)
-  const steps: CommandStep[] = []
-
-  if (needsSvn) {
-    addValidation(errors, fs.existsSync(svnUpdatePath), `SVN update path not found: ${svnUpdatePath}`)
-    steps.push({
-      name: 'Update SVN to test version',
-      cmd: 'powershell.exe',
-      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', buildSvnVersionSyncScript(versionInfo, svnUpdatePath)],
-      cwd: svnUpdatePath,
-    })
-  }
-
-  if (needsP4) {
-    addValidation(errors, p4SyncPaths.length > 0, 'No safe P4 sync paths found. Configure p4SyncPaths instead of syncing the outer project directory.')
-    for (const p4Path of p4SyncPaths) {
-      addValidation(errors, fs.existsSync(p4Path), `P4 sync path not found: ${p4Path}`)
-    }
-    steps.push({
-      name: 'Sync P4 to test version',
-      cmd: 'powershell.exe',
-      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', buildP4VersionSyncScript(versionInfo, p4SyncPaths, payload.p4Parallel !== false)],
-      cwd: payload.projectRoot,
-    })
-  }
-
-  warnings.push(`Parsed version text: P4@${versionInfo.mergedP4Head || '-'}, SVN@${versionInfo.mergedSvnHead || '-'}, P4Merge=${versionInfo.p4Merge.join(',') || '-'}, SVNMerge=${versionInfo.svnMerge.join(',') || '-'}`)
-  if (needsP4) {
-    warnings.push(`P4 safe sync paths: ${p4SyncPaths.join('; ')}`)
-  }
-
-  return steps
-}
-
 const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   const errors: string[] = []
   const warnings: string[] = []
@@ -550,15 +355,11 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     args: [REPLACE_MANAGER_TOOL_PY, REPLACE_MANAGER_SOURCE_DIR, payload.projectRoot, 'clean'],
     cwd: REPLACE_MANAGER_DIR,
   }
-  const versionUpdateSteps = buildVersionUpdateSteps(payload, projectDir, errors, warnings)
-  const steps = [...versionUpdateSteps, defaultEngineIniStep, replaceManagerStep, manifestStep, buildStep]
-
   return {
-    steps,
+    steps: [defaultEngineIniStep, replaceManagerStep, manifestStep, buildStep],
     cleanupSteps: [restoreReplaceManagerStep],
     outputSoCandidates,
     preview: [
-      ...versionUpdateSteps.map((step) => renderCommand(step.cmd, step.args, step.cwd)),
       renderCommand(defaultEngineIniStep.cmd, defaultEngineIniStep.args, defaultEngineIniStep.cwd),
       renderCommand(replaceManagerStep.cmd, replaceManagerStep.args, replaceManagerStep.cwd),
       renderCommand(manifestStep.cmd, manifestStep.args, manifestStep.cwd),
@@ -886,6 +687,9 @@ const buildRebuildSoPlan = (payload: BuildSoPayload): JobPlan => {
 }
 
 export const buildAndroidSoJobPlan = (jobType: AndroidSoJobType, payload: AndroidSoPayload): JobPlan => {
+  if (jobType === 'updateCodeAssets') {
+    return buildUpdateCodeAssetsPlan(payload as UpdateCodeAssetsPayload)
+  }
   if (jobType === 'buildSo') {
     return buildBuildSoPlan(payload as BuildSoPayload)
   }

@@ -5,9 +5,9 @@ import path from 'node:path'
 import {
   buildAndroidSoJobPlan,
   formatDefaultEngineIniSnippet,
-  parseBuildVersionUpdateText,
   updateDefaultEngineIniAndroidAbi,
 } from '../androidSoCommands'
+import { parseBuildVersionUpdateText } from '../versionUpdateCommands'
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cgtools-android-so-'))
 
@@ -79,6 +79,19 @@ try {
   fs.mkdirSync(path.join(projectDir, 'Source'), { recursive: true })
   fs.writeFileSync(path.join(projectDir, 'ShadowTrackerExtra.uproject'), '{}', 'utf-8')
   fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Engine'), { recursive: true })
+  const updatePlan = buildAndroidSoJobPlan('updateCodeAssets', {
+    projectRoot: tempRoot,
+    versionUpdateText: 'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
+    p4SyncPaths: [path.join(projectDir, 'Source')],
+    p4Parallel: true,
+  })
+
+  assert.deepEqual(updatePlan.steps.map((step) => step.name), ['Update Assets (P4)', 'Update SVN'])
+  assert(updatePlan.preview.includes('p4 sync'))
+  assert(updatePlan.preview.includes('svn update -r 1466919'))
+  assert(updatePlan.preview.includes('@5996891'))
+  assert(updatePlan.preview.includes('5996991'))
+
   const fullBuildPlan = buildAndroidSoJobPlan('buildSo', {
     projectRoot: tempRoot,
     projectFile: path.join(projectDir, 'ShadowTrackerExtra.uproject'),
@@ -86,16 +99,14 @@ try {
     defaultEngineIniPath: iniPath,
     config: 'Development',
     arch: 'arm64-v8a',
-    versionUpdateEnabled: true,
     versionUpdateText: 'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
     p4SyncPaths: [path.join(projectDir, 'Source')],
     p4Parallel: true,
-  })
+  } as any)
 
-  assert.deepEqual(fullBuildPlan.steps.slice(0, 2).map((step) => step.name), ['Update SVN to test version', 'Sync P4 to test version'])
-  assert(fullBuildPlan.preview.includes('svn update -r 1466919'))
-  assert(fullBuildPlan.preview.includes('@5996891'))
-  assert(fullBuildPlan.preview.includes('5996991'))
+  assert(!fullBuildPlan.steps.some((step) => step.name.includes('P4') || step.name.includes('SVN') || step.name.includes('Assets')))
+  assert(!fullBuildPlan.preview.includes('p4 sync'))
+  assert(!fullBuildPlan.preview.includes('svn update'))
 
   const rebuildPlan = buildAndroidSoJobPlan('rebuildSo', {
     projectRoot: tempRoot,

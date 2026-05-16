@@ -75,19 +75,8 @@
       <section class="fluent-card">
         <div class="card-header">Current Step Settings</div>
         <div class="card-body">
-          <div v-if="activeTab === 'buildSo'" class="field-grid">
-            <div class="field-row compact">
-              <label>Build Mode</label>
-              <select v-model="settings.buildMode" class="fluent-select">
-                <option value="full">Full Build SO</option>
-                <option value="rebuildOnly">Rebuild SO Only</option>
-              </select>
-            </div>
-            <label v-if="settings.buildMode === 'full'" class="check-line">
-              <input v-model="settings.versionUpdateEnabled" type="checkbox" />
-              Update SVN/P4 to test version before build
-            </label>
-            <div v-if="settings.buildMode === 'full' && settings.versionUpdateEnabled" class="version-update-card">
+          <div v-if="activeTab === 'updateCodeAssets'" class="field-grid">
+            <div class="version-update-card">
               <div class="field-row textarea-row">
                 <label>Version Text</label>
                 <textarea
@@ -114,7 +103,17 @@
                 P4Merge <code>{{ parsedVersionUpdate.p4Merge.join(', ') || '-' }}</code>,
                 SVNMerge <code>{{ parsedVersionUpdate.svnMerge.join(', ') || '-' }}</code>
               </div>
-              <div class="hint-line warn">P4 will sync child/safe paths only, never the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory directly.</div>
+              <div class="hint-line warn">Update runs as two independent nodes: assets by P4 first, then SVN. P4 never syncs the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory directly.</div>
+            </div>
+          </div>
+
+          <div v-else-if="activeTab === 'buildSo'" class="field-grid">
+            <div class="field-row compact">
+              <label>Build Mode</label>
+              <select v-model="settings.buildMode" class="fluent-select">
+                <option value="full">Full Build SO</option>
+                <option value="rebuildOnly">Rebuild SO Only</option>
+              </select>
             </div>
             <div v-if="settings.buildMode === 'full'" class="build-reminder-card">
               <div class="build-reminder-header">
@@ -349,7 +348,6 @@ const DEFAULT_PROJECT_ROOT = 'C:\\CJGame\\PRE418'
 const SETTINGS_KEYS = [
   'projectRoot',
   'buildMode',
-  'versionUpdateEnabled',
   'versionUpdateText',
   'p4SyncPathsText',
   'p4Parallel',
@@ -370,7 +368,7 @@ const SETTINGS_KEYS = [
   'aplFailMessage',
 ]
 
-const activeTab = ref('buildSo')
+const activeTab = ref('updateCodeAssets')
 const isRunning = ref(false)
 const collapsePathSection = ref(false)
 const terminalEl = ref(null)
@@ -481,7 +479,6 @@ const createDefaultSettings = (projectRoot = DEFAULT_PROJECT_ROOT) => {
   return {
     projectRoot: sharedPaths.projectRoot,
     buildMode: 'full',
-    versionUpdateEnabled: false,
     versionUpdateText: '',
     p4SyncPathsText: '',
     p4Parallel: true,
@@ -518,8 +515,9 @@ const defaultDetectedState = () => ({
 const detected = reactive(defaultDetectedState())
 const settings = reactive(createDefaultSettings(DEFAULT_PROJECT_ROOT))
 const visibleWorkflowTabs = [
-  { key: 'buildSo', label: '1) Build SO' },
-  { key: 'pushSo', label: '2) Push SO' },
+  { key: 'updateCodeAssets', label: '1) Update Code/Assets' },
+  { key: 'buildSo', label: '2) Build SO' },
+  { key: 'pushSo', label: '3) Push SO' },
 ]
 
 const cloneSettings = () => {
@@ -550,7 +548,6 @@ const sanitizeSettingsProfile = (profile, fallbackRoot = DEFAULT_PROJECT_ROOT) =
   if (!['full', 'rebuildOnly'].includes(sanitized.buildMode)) {
     sanitized.buildMode = 'full'
   }
-  sanitized.versionUpdateEnabled = !!sanitized.versionUpdateEnabled
   sanitized.versionUpdateText = sanitized.versionUpdateText || ''
   sanitized.p4SyncPathsText = sanitized.p4SyncPathsText || ''
   sanitized.p4Parallel = sanitized.p4Parallel !== false
@@ -770,41 +767,33 @@ const selectedIniSnippet = computed(() => {
 })
 
 const buildVersionUpdatePreviewSteps = () => {
-  if (!settings.versionUpdateEnabled) return []
-
   const parsed = parsedVersionUpdate.value
   const projectDir = sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, '')
   const configuredP4Paths = parseP4SyncPathsText(settings.p4SyncPathsText)
   const p4PathLabel = configuredP4Paths.length
     ? configuredP4Paths.join('; ')
     : `${projectDir}\\<child-dirs except .svn/.git/Saved/Intermediate/Binaries>`
-  const steps = []
 
-  if (parsed.mergedSvnHead || parsed.svnMerge.length) {
-    steps.push(createPreviewStep(
-      'Update SVN to test version',
-      [
-        `svn update -r ${parsed.mergedSvnHead || '<MergedSvnHead>'} ${quote(projectDir)} --non-interactive`,
-        ...parsed.svnMerge.map((revision) => `svn merge -c ${revision} <svn-url> ${quote(projectDir)} --non-interactive --accept postpone`),
-      ].join('\n'),
-      projectDir,
-    ))
-  }
-
-  if (parsed.mergedP4Head || parsed.p4Merge.length) {
-    steps.push(createPreviewStep(
-      'Sync P4 to test version',
+  return [
+    createPreviewStep(
+      'Update Assets (P4)',
       [
         `safe paths: ${p4PathLabel}`,
-        parsed.mergedP4Head ? `p4 sync <safe-path>\\...@${parsed.mergedP4Head}` : '',
-        ...parsed.p4Merge.map((change) => `p4 sync <safe-path>\\...@=${change}`),
+        parsed.mergedP4Head ? `p4 sync <safe-path>\\...@${parsed.mergedP4Head}` : 'p4 base: <MergedP4Head missing, skip base sync>',
+        ...(parsed.p4Merge.length ? parsed.p4Merge.map((change) => `p4 sync <safe-path>\\...@=${change}`) : ['p4 merges: <P4Merge missing, skip single changes>']),
         settings.p4Parallel ? 'parallel: enabled for multiple safe paths' : 'parallel: disabled',
-      ].filter(Boolean).join('\n'),
+      ].join('\n'),
       settings.projectRoot,
-    ))
-  }
-
-  return steps
+    ),
+    createPreviewStep(
+      'Update SVN',
+      [
+        parsed.mergedSvnHead ? `svn update -r ${parsed.mergedSvnHead} ${quote(projectDir)} --non-interactive` : 'svn base: <MergedSvnHead missing, skip update>',
+        ...(parsed.svnMerge.length ? parsed.svnMerge.map((revision) => `svn merge -c ${revision} <svn-url> ${quote(projectDir)} --non-interactive --accept postpone`) : ['svn merges: <SVNMerge missing, skip merges>']),
+      ].join('\n'),
+      projectDir,
+    ),
+  ]
 }
 
 const buildBuildPreviewSteps = () => {
@@ -828,7 +817,6 @@ const buildBuildPreviewSteps = () => {
   const cleanCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} clean`
 
   return [
-    ...buildVersionUpdatePreviewSteps(),
     createPreviewStep('Update DefaultEngine.ini Android ABI', iniCommand, projectDir),
     createPreviewStep('Prepare ReplaceManager patch', replaceCommand, replaceManagerDir),
     createPreviewStep('Generate UBT manifest', manifestCommand, settings.projectRoot),
@@ -878,6 +866,9 @@ const buildPushPreviewSteps = (soPath) => {
 }
 
 const commandPreviewSteps = computed(() => {
+  if (activeTab.value === 'updateCodeAssets') {
+    return buildVersionUpdatePreviewSteps()
+  }
   if (activeTab.value === 'buildSo') {
     return settings.buildMode === 'rebuildOnly' ? buildRebuildPreviewSteps() : buildBuildPreviewSteps()
   }
@@ -1153,6 +1144,15 @@ const ensureSocket = () => {
 }
 
 const buildPayload = () => {
+  if (activeTab.value === 'updateCodeAssets') {
+    return {
+      projectRoot: settings.projectRoot,
+      versionUpdateText: settings.versionUpdateText,
+      svnUpdatePath: sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, ''),
+      p4SyncPaths: parseP4SyncPathsText(settings.p4SyncPathsText),
+      p4Parallel: settings.p4Parallel !== false,
+    }
+  }
   if (activeTab.value === 'buildSo') {
     return {
       projectRoot: settings.projectRoot,
@@ -1163,11 +1163,6 @@ const buildPayload = () => {
       arch: settings.arch,
       logPath: settings.logPath?.trim() || undefined,
       maxParallelActions: Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? settings.maxParallelActions : undefined,
-      versionUpdateEnabled: settings.buildMode === 'full' && !!settings.versionUpdateEnabled,
-      versionUpdateText: settings.versionUpdateText,
-      svnUpdatePath: sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, ''),
-      p4SyncPaths: parseP4SyncPathsText(settings.p4SyncPathsText),
-      p4Parallel: settings.p4Parallel !== false,
     }
   }
   if (activeTab.value === 'replaceA') {

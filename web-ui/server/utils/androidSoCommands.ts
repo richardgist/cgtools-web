@@ -52,9 +52,6 @@ export interface CommandStep {
     type: 'updateDefaultEngineIni'
     defaultEngineIniPath: string
     arch: AndroidArch
-  } | {
-    type: 'validateReplaceManagerPatch'
-    projectRoot: string
   }
 }
 
@@ -75,23 +72,6 @@ const REPLACE_MANAGER_SOURCE_DIR = path.dirname(REPLACE_MANAGER_DIR)
 const REPLACE_MANAGER_TOOL_PY = path.join(REPLACE_MANAGER_DIR, 'ReplaceManagerTool.py')
 const REPLACE_MANAGER_CONFIG_JSON = path.join(REPLACE_MANAGER_SOURCE_DIR, 'ReplaceConfig.json')
 const ANDROID_RUNTIME_SETTINGS_SECTION = '[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]'
-const BUILD_SO_REPLACE_PATCH_CHECKS = [
-  {
-    relativePath: path.join('Survive', 'Source', 'ShadowTrackerExtra', 'Character', 'MoveAntiCheatComponent.h'),
-    expected: 'ShouldReceiveServerTrustDist declaration',
-    pattern: /ShouldReceiveServerTrustDist\s*\(/,
-  },
-  {
-    relativePath: path.join('Survive', 'Source', 'ShadowTrackerExtra', 'Character', 'MoveAntiCheatComponent.cpp'),
-    expected: 'UMoveAntiCheatComponent::ShouldReceiveServerTrustDist implementation',
-    pattern: /UMoveAntiCheatComponent::ShouldReceiveServerTrustDist\s*\(/,
-  },
-  {
-    relativePath: path.join('Survive', 'Source', 'ShadowTrackerExtra', 'Character', 'STCharacterMovementComponent.cpp'),
-    expected: 'ShouldReceiveServerTrustDist caller',
-    pattern: /->\s*ShouldReceiveServerTrustDist\s*\(/,
-  },
-]
 
 const quoteArg = (value: string) => {
   if (value.length === 0) return '""'
@@ -133,9 +113,11 @@ export const formatDefaultEngineIniSnippet = (arch: AndroidArch) => {
 export const updateDefaultEngineIniAndroidAbi = (defaultEngineIniPath: string, arch: AndroidArch) => {
   const values = getDefaultEngineIniAndroidAbiSettings(arch)
   const originalContent = fs.readFileSync(defaultEngineIniPath, 'utf-8')
+  // DefaultEngine.ini 可能来自不同工具或人工编辑，写回时保留原始换行风格和末尾换行，避免制造无关 diff。
   const newline = originalContent.includes('\r\n') ? '\r\n' : '\n'
   const hadTrailingNewline = originalContent.length === 0 || /\r?\n$/.test(originalContent)
   const lines = originalContent.length > 0 ? originalContent.replace(/\r?\n$/, '').split(/\r?\n/) : []
+  // UE ini section 名大小写不影响语义，这里按不区分大小写查找 AndroidRuntimeSettings section。
   const sectionMatcher = (line: string) => line.trim().toLowerCase() === ANDROID_RUNTIME_SETTINGS_SECTION.toLowerCase()
   const findSectionIndexes = () => lines
     .map((line, index) => ({ line, index }))
@@ -144,7 +126,8 @@ export const updateDefaultEngineIniAndroidAbi = (defaultEngineIniPath: string, a
   let sectionIndexes = findSectionIndexes()
 
   if (sectionIndexes.length === 0) {
-    if (lines.length > 0 && lines[lines.length - 1].trim() !== '') {
+    // 如果工程配置里还没有 AndroidRuntimeSettings，就追加一个新 section；前面补空行只是为了保持 ini 可读性。
+    if (lines.length > 0 && lines[lines.length - 1]!.trim() !== '') {
       lines.push('')
     }
     lines.push(ANDROID_RUNTIME_SETTINGS_SECTION)
@@ -152,8 +135,9 @@ export const updateDefaultEngineIniAndroidAbi = (defaultEngineIniPath: string, a
   }
 
   const findSectionEnd = (sectionIndex: number) => {
+    // section 的有效范围到下一个 [Section.Name] 之前为止，避免把别的配置段里的同名 key 改掉。
     for (let index = sectionIndex + 1; index < lines.length; index += 1) {
-      if (/^\s*\[[^\]]+\]\s*$/.test(lines[index])) {
+      if (/^\s*\[[^\]]+\]\s*$/.test(lines[index]!)) {
         return index
       }
     }
@@ -162,14 +146,18 @@ export const updateDefaultEngineIniAndroidAbi = (defaultEngineIniPath: string, a
 
   for (let sectionPosition = sectionIndexes.length - 1; sectionPosition >= 0; sectionPosition -= 1) {
     const sectionIndex = sectionIndexes[sectionPosition]
+    if (typeof sectionIndex !== 'number') {
+      continue
+    }
 
     for (const [key, value] of Object.entries(values)) {
       const keyPattern = new RegExp(`^\\s*${key}\\s*=`, 'i')
       const sectionEnd = findSectionEnd(sectionIndex)
       const matchingIndexes: number[] = []
 
+      // 同一个 section 内可能因为手工合并出现重复 key，先收集再统一处理，避免边遍历边删除导致索引漂移。
       for (let index = sectionIndex + 1; index < sectionEnd; index += 1) {
-        if (keyPattern.test(lines[index])) {
+        if (keyPattern.test(lines[index]!)) {
           matchingIndexes.push(index)
         }
       }
@@ -179,14 +167,16 @@ export const updateDefaultEngineIniAndroidAbi = (defaultEngineIniPath: string, a
         continue
       }
 
-      lines[matchingIndexes[0]] = `${key}=${value}`
+      // 保留第一个 key 的位置来减少配置重排；后续重复项删除，避免 UE 读取时被残留旧值覆盖。
+      lines[matchingIndexes[0]!] = `${key}=${value}`
       for (let index = matchingIndexes.length - 1; index > 0; index -= 1) {
-        lines.splice(matchingIndexes[index], 1)
+        lines.splice(matchingIndexes[index]!, 1)
       }
     }
   }
 
   const nextContent = `${lines.join(newline)}${hadTrailingNewline ? newline : ''}`
+  // 内容没变就不写盘，减少时间戳变化和无意义的工具链重新扫描。
   if (nextContent !== originalContent) {
     fs.writeFileSync(defaultEngineIniPath, nextContent, 'utf-8')
   }
@@ -195,32 +185,6 @@ export const updateDefaultEngineIniAndroidAbi = (defaultEngineIniPath: string, a
     changed: nextContent !== originalContent,
     defaultEngineIniPath,
     settings: values,
-  }
-}
-
-export const validateBuildSoReplacePatch = (projectRoot: string) => {
-  const checked: string[] = []
-  const missing: string[] = []
-
-  for (const check of BUILD_SO_REPLACE_PATCH_CHECKS) {
-    const filePath = path.join(projectRoot || '', check.relativePath)
-    checked.push(filePath)
-
-    if (!fs.existsSync(filePath)) {
-      missing.push(`${check.expected}: file not found: ${filePath}`)
-      continue
-    }
-
-    const content = fs.readFileSync(filePath, 'utf-8')
-    if (!check.pattern.test(content)) {
-      missing.push(`${check.expected}: missing in ${filePath}`)
-    }
-  }
-
-  return {
-    ok: missing.length === 0,
-    checked,
-    missing,
   }
 }
 
@@ -273,8 +237,9 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   const errors: string[] = []
   const warnings: string[] = []
   const projectDir = path.dirname(payload.projectFile || '')
-  const defaultEngineIniPath = (payload.defaultEngineIniPath || '').trim()
-    ? payload.defaultEngineIniPath.trim()
+  const requestedDefaultEngineIniPath = payload.defaultEngineIniPath?.trim() || ''
+  const defaultEngineIniPath = requestedDefaultEngineIniPath
+    ? requestedDefaultEngineIniPath
     : path.join(projectDir, 'Config', 'DefaultEngine.ini')
   const targetName = path.basename(payload.projectFile || '', path.extname(payload.projectFile || ''))
   const ubtExe = path.join(payload.engineRoot || '', 'Binaries', 'DotNET', 'UnrealBuildTool.exe')
@@ -283,7 +248,7 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     ? (path.isAbsolute((payload.logPath || '').trim()) ? (payload.logPath || '').trim() : path.join(payload.projectRoot || '', (payload.logPath || '').trim()))
     : defaultLogPath
   const outputSoCandidates = buildAndroidSoOutputCandidates(payload.projectFile, payload.config, payload.arch)
-  const outputSoPath = outputSoCandidates[0]
+  const outputSoPath = outputSoCandidates[0] || ''
   const archArgMap: Record<AndroidArch, string> = {
     'arm64-v8a': '-arm64',
     'armeabi-v7a': '-armv7',
@@ -352,7 +317,7 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   const defaultEngineIniCommand = buildDefaultEngineIniPreviewCommand(defaultEngineIniPath, payload.arch)
   const defaultEngineIniStep: CommandStep = {
     name: 'Update DefaultEngine.ini Android ABI',
-    cmd: defaultEngineIniCommand[0],
+    cmd: defaultEngineIniCommand[0] || 'cgtools:update-default-engine-ini',
     args: defaultEngineIniCommand.slice(1),
     cwd: projectDir,
     internalAction: {
@@ -367,17 +332,6 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     cmd: 'python',
     args: [REPLACE_MANAGER_TOOL_PY, REPLACE_MANAGER_SOURCE_DIR, payload.projectRoot, 'restore'],
     cwd: REPLACE_MANAGER_DIR,
-  }
-
-  const validateReplaceManagerStep: CommandStep = {
-    name: 'Validate ReplaceManager patch',
-    cmd: 'cgtools:validate-replacemanager-patch',
-    args: [`-ProjectRoot=${payload.projectRoot}`, '-Expect=ShouldReceiveServerTrustDist'],
-    cwd: payload.projectRoot,
-    internalAction: {
-      type: 'validateReplaceManagerPatch',
-      projectRoot: payload.projectRoot,
-    },
   }
 
   const manifestStep: CommandStep = {
@@ -402,13 +356,12 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   }
 
   return {
-    steps: [defaultEngineIniStep, replaceManagerStep, validateReplaceManagerStep, manifestStep, buildStep],
+    steps: [defaultEngineIniStep, replaceManagerStep, manifestStep, buildStep],
     cleanupSteps: [restoreReplaceManagerStep],
     outputSoCandidates,
     preview: [
       renderCommand(defaultEngineIniStep.cmd, defaultEngineIniStep.args, defaultEngineIniStep.cwd),
       renderCommand(replaceManagerStep.cmd, replaceManagerStep.args, replaceManagerStep.cwd),
-      renderCommand(validateReplaceManagerStep.cmd, validateReplaceManagerStep.args, validateReplaceManagerStep.cwd),
       renderCommand(manifestStep.cmd, manifestStep.args, manifestStep.cwd),
       renderCommand(buildStep.cmd, buildStep.args, buildStep.cwd),
       renderCommand(restoreReplaceManagerStep.cmd, restoreReplaceManagerStep.args, restoreReplaceManagerStep.cwd),

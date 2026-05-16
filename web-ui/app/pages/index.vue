@@ -122,7 +122,7 @@
         </div>
         <div class="card-content">
           <div class="card-title">Pak Tool</div>
-          <div class="card-desc">启动 trunk 下的 PakToolPlus，并快速打开工具目录和输出目录</div>
+          <div class="card-desc">启动 trunk 下的 CookAndPakAsset，并快速打开工具目录和输出目录</div>
         </div>
         <div class="card-action">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

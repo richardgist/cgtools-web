@@ -51,8 +51,30 @@
                   v-for="item in group.items"
                   :key="item.id"
                   class="console-history-item"
-                  :class="{ active: isConsoleHistoryItemActive(item), editing: editingConsoleHistoryId === item.id }"
+                  :class="{
+                    active: isConsoleHistoryItemActive(item),
+                    editing: editingConsoleHistoryId === item.id,
+                    dragging: draggedConsoleHistoryId === item.id,
+                    'drop-before': dragOverConsoleHistoryId === item.id && dragOverConsoleHistoryPosition === 'before',
+                    'drop-after': dragOverConsoleHistoryId === item.id && dragOverConsoleHistoryPosition === 'after',
+                  }"
+                  :draggable="editingConsoleHistoryId !== item.id"
+                  @dragstart.stop="startConsoleHistoryDrag($event, item)"
+                  @dragover.prevent="handleConsoleHistoryDragOver($event, item)"
+                  @drop.prevent="dropConsoleHistoryItem(item)"
+                  @dragenter.prevent
+                  @dragend="finishConsoleHistoryDrag"
                 >
+                  <button
+                    class="history-drag-handle"
+                    type="button"
+                    title="拖动调整命令位置"
+                    @click.stop
+                  >
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </button>
                   <button class="history-select-btn" type="button" @click="selectConsoleHistory(item)">
                     <span class="history-command">{{ item.command }}</span>
                     <span class="history-meta">{{ item.packageName || 'com.tencent.tmgp.pubgmhd' }}{{ item.deviceSerial ? ` · ${item.deviceSerial}` : '' }}</span>
@@ -284,6 +306,51 @@
               :disabled="isLoadingScriptContent || isSavingScriptContent || isRunning"
             ></textarea>
           </div>
+          <div v-if="activeMode === 'script' && isCvarScriptSelected" class="cvar-viewer-panel">
+            <div class="cvar-viewer-head">
+              <div class="script-editor-title-group">
+                <span class="script-editor-title">CVar 列表</span>
+                <span class="script-editor-meta" :class="{ error: cvarLoadError }">{{ cvarStatusText }}</span>
+              </div>
+              <div class="cvar-viewer-actions">
+                <input
+                  v-model="cvarFilter"
+                  class="fluent-input cvar-filter-input"
+                  placeholder="按 Name / Value 搜索"
+                />
+                <button class="command-btn command-ghost compact" @click="loadCvars({ notify: true })" :disabled="isLoadingCvars">
+                  {{ isLoadingCvars ? '读取中' : '刷新 CVar' }}
+                </button>
+                <button class="command-btn command-ghost compact" @click="openCvarSource" :disabled="!cvarSourcePath">
+                  打开 CSV
+                </button>
+                <button class="command-btn command-ghost compact" @click="copyVisibleCvars" :disabled="filteredCvarRows.length === 0">
+                  复制结果
+                </button>
+              </div>
+            </div>
+            <div v-if="visibleCvarRows.length" class="cvar-table-wrap">
+              <table class="cvar-table">
+                <thead>
+                  <tr>
+                    <th class="cvar-index-col">#</th>
+                    <th>Name</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in visibleCvarRows" :key="`${row.index}-${row.name}`">
+                    <td class="cvar-index-col">{{ row.index }}</td>
+                    <td class="cvar-name">{{ row.name }}</td>
+                    <td class="cvar-value">{{ row.value }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="cvar-empty">
+              {{ cvarLoadError || '还没有可展示的 CVar 数据。运行 pull_cvar.bat 成功后会自动刷新。' }}
+            </div>
+          </div>
           <div class="terminal" ref="terminalEl">
             <div v-for="(log, idx) in logs" :key="idx" :class="['terminal-line', log.type]">
               <template v-for="(part, partIndex) in formatTerminalLogParts(log.text)" :key="`${idx}-${partIndex}`">
@@ -307,6 +374,7 @@
 
 <script setup>
 import { computed, ref, onMounted, nextTick, watch } from 'vue'
+import { moveConsoleHistoryItem } from '~/utils/consoleHistoryOrder'
 
 const LEGACY_PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v1'
 const PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v2'
@@ -408,12 +476,21 @@ const consoleCommands = ref([])
 const consoleCommandSourcePath = ref('')
 const consoleCommandUpdatedAt = ref(0)
 const consoleCommandLoadError = ref('')
+const cvarRows = ref([])
+const cvarSourcePath = ref('')
+const cvarUpdatedAt = ref(0)
+const cvarLoadError = ref('')
+const cvarFilter = ref('')
 const consoleCursorIndex = ref(0)
 const consoleSuggestionIndex = ref(0)
 const isLoadingLocalConsoleCommands = ref(false)
 const isSyncingConsoleCommands = ref(false)
+const isLoadingCvars = ref(false)
 const editingConsoleHistoryId = ref('')
 const editingConsoleHistoryTags = ref('')
+const draggedConsoleHistoryId = ref('')
+const dragOverConsoleHistoryId = ref('')
+const dragOverConsoleHistoryPosition = ref('before')
 const scriptContent = ref('')
 const savedScriptContent = ref('')
 const scriptContentLoaded = ref(false)
@@ -451,6 +528,9 @@ const selectScript = (script) => {
   selectedScript.value = script
   applySavedScriptParams(script)
   loadScriptContent(script)
+  if (isCvarScript(script)) {
+    loadCvars()
+  }
 }
 
 const switchMode = (mode) => {
@@ -464,6 +544,8 @@ const switchMode = (mode) => {
   localStorage.setItem(MODE_STORAGE_KEY, mode)
 }
 
+const isCvarScript = (script) => String(script?.name || '').toLowerCase() === 'pull_cvar.bat'
+const isCvarScriptPath = (scriptPath) => /(^|[\\/])pull_cvar\.bat$/i.test(String(scriptPath || ''))
 const selectedScriptParams = computed(() => selectedScript.value?.params || [])
 const selectedScriptParamProjects = computed(() => {
   const key = getScriptParamKey(selectedScript.value)
@@ -504,6 +586,7 @@ const currentRunnerStatusText = computed(() => {
   }
   return selectedScript.value ? scriptStatusText.value : '未选择'
 })
+const isCvarScriptSelected = computed(() => isCvarScript(selectedScript.value))
 const canRunCurrent = computed(() => {
   if (isRunning.value) return false
   if (activeMode.value === 'console') return Boolean(consoleCommand.value.trim())
@@ -543,6 +626,33 @@ const consoleCommandStatusText = computed(() => {
   const sourceName = consoleCommandSourcePath.value ? consoleCommandSourcePath.value.split(/[\\/]/).pop() : '未知来源'
   return `${consoleCommands.value.length} 条命令 · ${sourceName} · ${timeText}`
 })
+const normalizedCvarFilter = computed(() => cvarFilter.value.trim().toLowerCase())
+const filteredCvarRows = computed(() => {
+  const filter = normalizedCvarFilter.value
+  if (!filter) return cvarRows.value
+
+  return cvarRows.value.filter((row) => {
+    const name = String(row.name || '').toLowerCase()
+    const value = String(row.value || '').toLowerCase()
+    return name.includes(filter) || value.includes(filter)
+  })
+})
+const visibleCvarRows = computed(() => filteredCvarRows.value.slice(0, 500))
+const cvarStatusText = computed(() => {
+  if (isLoadingCvars.value) return '正在读取 PerformanceData/Logs 最新 CVar CSV...'
+  if (cvarLoadError.value) return cvarLoadError.value
+  if (!cvarRows.value.length) return '未找到 CVar CSV'
+
+  const sourceName = cvarSourcePath.value ? cvarSourcePath.value.split(/[\\/]/).pop() : '未知来源'
+  const timeText = cvarUpdatedAt.value ? new Date(cvarUpdatedAt.value).toLocaleString() : '未知时间'
+  const matchText = normalizedCvarFilter.value
+    ? `，匹配 ${filteredCvarRows.value.length} 条`
+    : ''
+  const limitText = filteredCvarRows.value.length > visibleCvarRows.value.length
+    ? `，当前显示前 ${visibleCvarRows.value.length} 条`
+    : ''
+  return `${cvarRows.value.length} 条 CVar${matchText}${limitText} · ${sourceName} · ${timeText}`
+})
 const currentScriptLogKey = computed(() => activeMode.value === 'console' ? CONSOLE_LOG_KEY : selectedScript.value?.path || '')
 const logs = computed(() => {
   const key = currentScriptLogKey.value
@@ -557,13 +667,22 @@ const currentConsoleHistoryActionText = computed(() => (
   isCurrentConsoleCommandCollected.value ? '更新收录' : '收录命令'
 ))
 const consoleHistoryGroups = computed(() => {
-  const groups = CONSOLE_HISTORY_CATEGORIES
-    .map((category) => ({
-      key: category.key,
-      label: category.label,
-      items: consoleHistory.value.filter((item) => getConsoleCommandCategory(item.command).key === category.key),
-    }))
-    .filter((group) => group.items.length > 0)
+  const groups = []
+  let currentGroup = null
+
+  for (const item of consoleHistory.value) {
+    const category = getConsoleCommandCategory(item.command)
+    if (!currentGroup || currentGroup.categoryKey !== category.key) {
+      currentGroup = {
+        key: `${category.key}-${groups.length}`,
+        categoryKey: category.key,
+        label: category.label,
+        items: [],
+      }
+      groups.push(currentGroup)
+    }
+    currentGroup.items.push(item)
+  }
 
   return groups
 })
@@ -717,6 +836,8 @@ const persistConsoleSettings = () => {
 const persistConsoleHistory = () => {
   localStorage.setItem(CONSOLE_HISTORY_STORAGE_KEY, JSON.stringify(consoleHistory.value))
 }
+
+const getConsoleHistoryItemDragKey = (item) => item?.id || item?.commandKey || normalizeConsoleCommandKey(item?.command)
 
 const normalizeConsoleCommandKey = (command) => {
   const normalized = String(command || '').trim().replace(/\s+/g, ' ').toLowerCase()
@@ -908,6 +1029,48 @@ const saveConsoleHistoryTags = (item) => {
   persistConsoleHistory()
 }
 
+const startConsoleHistoryDrag = (event, item) => {
+  const dragKey = getConsoleHistoryItemDragKey(item)
+  if (!dragKey) return
+
+  draggedConsoleHistoryId.value = dragKey
+  dragOverConsoleHistoryId.value = dragKey
+  dragOverConsoleHistoryPosition.value = 'before'
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', dragKey)
+}
+
+const handleConsoleHistoryDragOver = (event, item) => {
+  const targetKey = getConsoleHistoryItemDragKey(item)
+  if (!draggedConsoleHistoryId.value || !targetKey) return
+
+  const rect = event.currentTarget.getBoundingClientRect()
+  const position = event.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+  dragOverConsoleHistoryId.value = targetKey
+  dragOverConsoleHistoryPosition.value = position
+  event.dataTransfer.dropEffect = 'move'
+}
+
+const finishConsoleHistoryDrag = () => {
+  draggedConsoleHistoryId.value = ''
+  dragOverConsoleHistoryId.value = ''
+  dragOverConsoleHistoryPosition.value = 'before'
+}
+
+const dropConsoleHistoryItem = (item) => {
+  const draggedKey = draggedConsoleHistoryId.value
+  const targetKey = getConsoleHistoryItemDragKey(item)
+  const position = dragOverConsoleHistoryPosition.value
+  if (!draggedKey || !targetKey) {
+    finishConsoleHistoryDrag()
+    return
+  }
+
+  consoleHistory.value = moveConsoleHistoryItem(consoleHistory.value, draggedKey, targetKey, position)
+  persistConsoleHistory()
+  finishConsoleHistoryDrag()
+}
+
 const getErrorMessage = (error, fallback) => {
   return error?.data?.statusMessage || error?.statusMessage || error?.message || fallback
 }
@@ -920,6 +1083,60 @@ const applyConsoleCommandSnapshot = (snapshot) => {
   consoleSuggestionIndex.value = 0
 }
 
+const applyCvarSnapshot = (snapshot) => {
+  cvarRows.value = Array.isArray(snapshot.rows) ? snapshot.rows : []
+  cvarSourcePath.value = snapshot.sourcePath || ''
+  cvarUpdatedAt.value = Number(snapshot.updatedAt || 0)
+  cvarLoadError.value = ''
+}
+
+const loadCvars = async (options = {}) => {
+  if (isLoadingCvars.value) return
+
+  const shouldNotify = options.notify === true
+  isLoadingCvars.value = true
+  cvarLoadError.value = ''
+  if (shouldNotify) {
+    appendLog('info', '[info] 正在读取最新 CVar CSV...\n')
+  }
+
+  try {
+    const snapshot = await $fetch('/api/scripts/cvars')
+    applyCvarSnapshot(snapshot)
+    if (shouldNotify) {
+      appendLog('info', `[info] 已读取 ${cvarRows.value.length} 条 CVar：${cvarSourcePath.value || '无本地 CVar 文件'}\n`)
+    }
+  } catch (error) {
+    const message = getErrorMessage(error, '未知错误')
+    cvarLoadError.value = `读取 CVar 失败：${message}`
+    if (shouldNotify) {
+      appendLog('stderr', `[error] 读取 CVar 失败：${message}\n`)
+    }
+  } finally {
+    isLoadingCvars.value = false
+  }
+}
+
+const openCvarSource = () => {
+  if (!cvarSourcePath.value) return
+  openLocalPath(cvarSourcePath.value)
+}
+
+const copyVisibleCvars = async () => {
+  const rows = filteredCvarRows.value
+  if (!rows.length) return
+
+  const text = [
+    'Index,Name,Value',
+    ...rows.map((row) => [row.index, row.name, row.value].map((cell) => {
+      const value = String(cell ?? '')
+      return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+    }).join(',')),
+  ].join('\n')
+  const copied = await copyText(text)
+  appendLog(copied ? 'info' : 'stderr', copied ? `[info] 已复制 ${rows.length} 条 CVar。\n` : '[error] 复制 CVar 失败。\n')
+}
+
 const loadConsoleCommands = async (options = {}) => {
   if (isLoadingLocalConsoleCommands.value) return
 
@@ -929,7 +1146,7 @@ const loadConsoleCommands = async (options = {}) => {
   const localPath = consoleCommandLocalPath.value.trim()
 
   if (shouldNotify) {
-    appendLog('info', `[info] 正在读取本地 UE Console 命令库：${localPath || '默认 scripts/Logs 最新 CSV'}\n`, CONSOLE_LOG_KEY)
+    appendLog('info', `[info] 正在读取本地 UE Console 命令库：${localPath || '默认 PerformanceData/Logs 最新 CSV'}\n`, CONSOLE_LOG_KEY)
   }
 
   try {
@@ -1318,6 +1535,9 @@ const startTerminalRun = (runLogKey, startLine, payload) => {
     } else if (data.type === 'end') {
       appendLog('info', '\n✓ Process exited with code ' + data.exitCode, runLogKey)
       isRunning.value = false
+      if (data.exitCode === 0 && isCvarScriptPath(runLogKey)) {
+        loadCvars({ notify: true })
+      }
       if (ws) ws.close()
     }
   }
@@ -1486,6 +1706,7 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 }
 
 .console-history-item {
+  position: relative;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -1494,6 +1715,7 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   gap: 6px;
   border-radius: var(--radius-sm);
   background: transparent;
+  cursor: grab;
 }
 
 .console-history-item:hover,
@@ -1505,6 +1727,60 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 
 .console-history-item.editing {
   background: rgba(96, 205, 255, 0.06);
+}
+
+.console-history-item.dragging {
+  cursor: grabbing;
+  opacity: 0.52;
+}
+
+.console-history-item.drop-before::before,
+.console-history-item.drop-after::after {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent-default);
+  box-shadow: 0 0 12px rgba(96, 205, 255, 0.44);
+  content: "";
+}
+
+.console-history-item.drop-before::before {
+  top: -4px;
+}
+
+.console-history-item.drop-after::after {
+  bottom: -4px;
+}
+
+.history-drag-handle {
+  display: inline-flex;
+  width: 28px;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 6px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  background: transparent;
+}
+
+.history-drag-handle:hover,
+.history-drag-handle:focus-visible {
+  border-color: rgba(96, 205, 255, 0.2);
+  color: #b7ecff;
+  background: rgba(96, 205, 255, 0.08);
+}
+
+.history-drag-handle span {
+  width: 12px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .history-select-btn {
@@ -2076,6 +2352,98 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   box-shadow: inset 0 0 0 1px rgba(96, 205, 255, 0.35);
 }
 
+.cvar-viewer-panel {
+  display: flex;
+  flex: 0 0 30%;
+  min-height: 210px;
+  flex-direction: column;
+  border-bottom: 1px solid var(--divider);
+  background: rgba(8, 12, 14, 0.48);
+}
+
+.cvar-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.script-editor-meta.error {
+  color: #ffb4bd;
+}
+
+.cvar-viewer-actions {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cvar-filter-input {
+  width: min(360px, 34vw);
+  min-width: 180px;
+}
+
+.cvar-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cvar-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.cvar-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--text-secondary);
+  background: #15191b;
+}
+
+.cvar-table th,
+.cvar-table td {
+  overflow: hidden;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cvar-index-col {
+  width: 74px;
+  color: var(--text-tertiary);
+}
+
+.cvar-name {
+  color: #dff6ff;
+}
+
+.cvar-value {
+  width: 210px;
+  color: #d8ffd2;
+}
+
+.cvar-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
 @media (max-width: 900px) {
   .script-param-project-row,
   .script-param-row,
@@ -2085,13 +2453,19 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   }
 
   .script-runner-header,
-  .script-editor-head {
+  .script-editor-head,
+  .cvar-viewer-head {
     align-items: stretch;
     flex-direction: column;
   }
 
   .script-command-bar,
-  .script-editor-actions {
+  .script-editor-actions,
+  .cvar-viewer-actions {
+    width: 100%;
+  }
+
+  .cvar-filter-input {
     width: 100%;
   }
 }

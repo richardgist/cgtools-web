@@ -24,4 +24,6 @@ Thumbs.db
 # Project specific
 *.log
 *.patch
-scripts/Saved/
+
+# Data
+PerformanceData/

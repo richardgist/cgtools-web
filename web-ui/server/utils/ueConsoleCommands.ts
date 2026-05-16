@@ -21,6 +21,18 @@ export type UeConsoleCommandSnapshot = {
   updatedAt: number
 }
 
+export type UeCVarEntry = {
+  index: string
+  name: string
+  value: string
+}
+
+export type UeCVarSnapshot = {
+  rows: UeCVarEntry[]
+  sourcePath: string
+  updatedAt: number
+}
+
 const COMMAND_NAME_PATTERN = /^[A-Za-z0-9_.:-]+(?:\s+[A-Za-z0-9_.:-]+)*$/
 
 const parseCsvLine = (line: string) => {
@@ -106,6 +118,46 @@ export const parseConsoleCommandCsv = (content: string): UeConsoleCommand[] => {
   return result
 }
 
+export const parseCVarCsv = (content: string): UeCVarEntry[] => {
+  const result: UeCVarEntry[] = []
+  let indexColumnIndex = 0
+  let nameColumnIndex = 1
+  let valueColumnIndex = 2
+  let hasDetectedHeader = false
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+
+    const cells = parseCsvLine(line)
+    const lowerCells = cells.map((cell) => cell.trim().toLowerCase())
+    const detectedNameIndex = lowerCells.indexOf('name')
+    if (!hasDetectedHeader && detectedNameIndex >= 0) {
+      indexColumnIndex = lowerCells.indexOf('index')
+      nameColumnIndex = detectedNameIndex
+      valueColumnIndex = lowerCells.indexOf('value')
+      hasDetectedHeader = true
+      continue
+    }
+
+    if (lowerCells[nameColumnIndex] === 'name') {
+      continue
+    }
+
+    hasDetectedHeader = true
+    const name = (cells[nameColumnIndex] || '').trim()
+    if (!name) continue
+
+    result.push({
+      index: indexColumnIndex >= 0 ? (cells[indexColumnIndex] || '').trim() : String(result.length),
+      name,
+      value: valueColumnIndex >= 0 ? (cells[valueColumnIndex] || '').trim() : '',
+    })
+  }
+
+  return result
+}
+
 export const mergeBuiltInConsoleCommands = (commands: UeConsoleCommand[]) => {
   const result: UeConsoleCommand[] = []
   const seen = new Set<string>()
@@ -160,7 +212,7 @@ export const filterConsoleCommandSuggestions = (
   return [...startsWith, ...contains].slice(0, limit)
 }
 
-export const getConsoleCommandLogsDir = () => path.join(getScriptsDir(), 'Logs')
+export const getConsoleCommandLogsDir = () => path.resolve(getScriptsDir(), '..', 'PerformanceData', 'Logs')
 
 export const getLatestConsoleCommandCsvPath = () => {
   const logsDir = getConsoleCommandLogsDir()
@@ -197,6 +249,30 @@ export const loadConsoleCommandSnapshotFromPath = (sourcePath: string): UeConsol
   const content = fs.readFileSync(sourcePath, 'utf-8')
   return {
     commands: mergeBuiltInConsoleCommands(parseConsoleCommandCsv(content)),
+    sourcePath: resolvedPath,
+    updatedAt: stat.mtimeMs,
+  }
+}
+
+export const loadLatestCVarSnapshot = (): UeCVarSnapshot => {
+  const sourcePath = getLatestConsoleCommandCsvPath()
+  if (!sourcePath) {
+    return { rows: [], sourcePath: '', updatedAt: 0 }
+  }
+
+  return loadCVarSnapshotFromPath(sourcePath)
+}
+
+export const loadCVarSnapshotFromPath = (sourcePath: string): UeCVarSnapshot => {
+  const resolvedPath = path.resolve(sourcePath)
+  const stat = fs.statSync(resolvedPath)
+  if (!stat.isFile()) {
+    throw new Error(`CVar 路径不是文件：${resolvedPath}`)
+  }
+
+  const content = fs.readFileSync(sourcePath, 'utf-8')
+  return {
+    rows: parseCVarCsv(content),
     sourcePath: resolvedPath,
     updatedAt: stat.mtimeMs,
   }

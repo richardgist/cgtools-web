@@ -4,10 +4,18 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   filterConsoleCommandSuggestions,
+  getConsoleCommandLogsDir,
   mergeBuiltInConsoleCommands,
   loadConsoleCommandSnapshotFromPath,
+  parseCVarCsv,
   parseConsoleCommandCsv,
 } from '../ueConsoleCommands'
+
+assert.equal(
+  getConsoleCommandLogsDir(),
+  path.resolve(process.cwd(), '../PerformanceData/Logs'),
+  'CVar sync should save to the unified PerformanceData/Logs directory',
+)
 
 const csv = [
   'Name,Help,Flags',
@@ -81,6 +89,13 @@ assert.deepEqual(
   indexedParsed.map((item) => item.name),
   ['r.DumpingMovie', 'VisualizeTexture', 'r.Landscape.EnableCombineSectionStrategy'],
 )
+
+const parsedCvars = parseCVarCsv(indexedCsv)
+assert.deepEqual(parsedCvars, [
+  { index: '0', name: 'r.DumpingMovie', value: '0' },
+  { index: '1', name: 'VisualizeTexture', value: 'null' },
+  { index: '2294', name: 'r.Landscape.EnableCombineSectionStrategy', value: '0' },
+])
 
 const landscapeMatches = filterConsoleCommandSuggestions(indexedParsed, 'r.land')
 assert.deepEqual(landscapeMatches.map((item) => item.name), ['r.Landscape.EnableCombineSectionStrategy'])

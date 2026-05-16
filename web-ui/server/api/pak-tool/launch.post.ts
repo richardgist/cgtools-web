@@ -34,6 +34,7 @@ export default defineEventHandler(async (event) => {
     const child = spawn(plan.cmd, plan.args, {
       cwd: plan.cwd,
       detached: true,
+      shell: plan.cmd.toLowerCase().endsWith('.bat'),
       stdio: 'ignore',
       windowsHide: false,
     })

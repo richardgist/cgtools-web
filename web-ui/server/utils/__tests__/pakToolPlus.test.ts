@@ -21,7 +21,7 @@ import {
 } from '../pakToolPlus'
 
 const expectedProjectRoot = 'E:\\CJGame\\trunk'
-const expectedExe = 'E:\\CJGame\\trunk\\Survive\\Paktools\\CookAndPakAssetPlus\\PakToolPlus.exe'
+const expectedExe = 'E:\\CJGame\\trunk\\Survive\\Paktools\\CookAndPakAsset\\Do.bat'
 
 assert.equal(DEFAULT_PROJECT_ROOT, expectedProjectRoot)
 assert.equal(DEFAULT_PAK_TOOL_EXE, expectedExe)
@@ -36,7 +36,7 @@ const paths = buildPakToolPaths(DEFAULT_PAK_TOOL_EXE)
 assert.equal(paths.projectRoot, expectedProjectRoot)
 assert.equal(paths.exePath, expectedExe)
 assert.equal(paths.toolDir, path.dirname(expectedExe))
-assert.equal(paths.batPath, path.join(path.dirname(expectedExe), 'PakToolPlus.bat'))
+assert.equal(paths.batPath, expectedExe)
 assert.equal(paths.tempPaksDir, path.join(path.dirname(expectedExe), 'Temp', 'Paks'))
 
 const launchPlan = createPakToolLaunchPlan(DEFAULT_PAK_TOOL_EXE)
@@ -48,8 +48,8 @@ const status = getPakToolStatus(DEFAULT_PAK_TOOL_EXE)
 assert.equal(status.exePath, expectedExe)
 assert.equal(status.detected.windows, process.platform === 'win32')
 assert.equal(status.detected.projectRootExists, true, 'default project root should exist')
-assert.equal(status.detected.exeExists, true, 'PakToolPlus.exe should exist at the configured default path')
-assert.equal(status.detected.toolDirExists, true, 'PakToolPlus directory should exist')
+assert.equal(status.detected.exeExists, true, 'Do.bat should exist at the configured default path')
+assert.equal(status.detected.toolDirExists, true, 'CookAndPakAsset directory should exist')
 
 assert.equal(
   buildAndroidSavedPaksDir(DEFAULT_PACKAGE_NAME, DEFAULT_GAME_NAME),

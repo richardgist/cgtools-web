@@ -53,7 +53,9 @@ if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
 }
 
 if (-not $LocalDir.Trim()) {
-    $LocalDir = Join-Path $PSScriptRoot 'Saved'
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $performanceDataRoot = Join-Path $repoRoot 'PerformanceData'
+    $LocalDir = Join-Path $performanceDataRoot 'Saved'
 }
 
 if (-not (Test-Path $LocalDir)) {

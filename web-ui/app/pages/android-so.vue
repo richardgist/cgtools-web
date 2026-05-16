@@ -14,11 +14,15 @@
         <div class="card-header">Workflow Tabs</div>
         <div class="card-body">
           <div class="tab-row">
-            <button class="tab-btn" :class="{ active: activeTab === 'buildSo' }" @click="activeTab = 'buildSo'">1) Build SO</button>
-            <button class="tab-btn" :class="{ active: activeTab === 'replaceA' }" @click="activeTab = 'replaceA'">2) Plan A Replace APK SO</button>
-            <button class="tab-btn" :class="{ active: activeTab === 'injectB' }" @click="activeTab = 'injectB'">3) Plan B Inject Runtime SO</button>
-            <button class="tab-btn" :class="{ active: activeTab === 'pushSo' }" @click="activeTab = 'pushSo'">4) Push SO</button>
-            <button class="tab-btn" :class="{ active: activeTab === 'guideC' }" @click="activeTab = 'guideC'">5) Plan C APL Guide</button>
+            <button
+              v-for="tab in visibleWorkflowTabs"
+              :key="tab.key"
+              class="tab-btn"
+              :class="{ active: activeTab === tab.key }"
+              @click="activeTab = tab.key"
+            >
+              {{ tab.label }}
+            </button>
           </div>
         </div>
       </section>
@@ -76,16 +80,14 @@
               <div class="build-reminder-header">
                 <div>
                   <div class="build-reminder-step">Step 0</div>
-                  <div class="build-reminder-title">Check DefaultEngine.ini Before Build</div>
+                  <div class="build-reminder-title">Auto Update DefaultEngine.ini Before Build</div>
                 </div>
-                <button class="fluent-btn sub" @click="copyArm64IniSnippet">Copy Arm64 Snippet</button>
+                <button class="fluent-btn sub" @click="copySelectedIniSnippet">Copy ABI Snippet</button>
               </div>
               <div class="build-reminder-text">
-                Update <code>{{ defaultEngineIniPath }}</code> before building. For your usual workflow, keep Android ABI on arm64 only.
+                Run will update <code>{{ defaultEngineIniPath }}</code> before building so the selected Android ABI is the only enabled ABI.
               </div>
-              <pre class="build-reminder-code">[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]
-bBuildForArmV7=False
-bBuildForArm64=True</pre>
+              <pre class="build-reminder-code">{{ selectedIniSnippet }}</pre>
             </div>
             <div class="field-row compact">
               <label>Config</label>
@@ -180,8 +182,12 @@ bBuildForArm64=True</pre>
               <label>Package Name</label>
               <input v-model="settings.pushPackageName" class="fluent-input path-input" placeholder="com.tencent.tmgp.pubgmhd" />
             </div>
+            <label class="check-line" v-if="settings.pushUseRunAs">
+              <input v-model="settings.pushLaunchAfterPush" type="checkbox" />
+              Launch package after SO push
+            </label>
             <div v-if="settings.pushUseRunAs" class="hint-line">
-              Run-as mode always copies to <code>app_lib/libUE4.so</code> inside the package sandbox.
+              Run-as mode runs push, sandbox copy, file verification, and optional package launch in one click.
             </div>
             <div v-else class="hint-line warn">
               Direct adb mode is enabled, so preview only shows one push step. Enable <code>Use run-as</code> to generate the phone-side copy and verify steps.
@@ -215,8 +221,43 @@ bBuildForArm64=True</pre>
       </section>
 
       <section class="fluent-card">
-        <div class="card-header">Command Preview</div>
+        <div class="card-header">
+          <span>Command Preview</span>
+          <div class="terminal-actions" v-if="runLogDir">
+            <button class="fluent-btn sub" @click="openLocalPath(runLogDir, 'folder')">Open Run Logs</button>
+          </div>
+        </div>
         <div class="card-body">
+          <div v-if="workflowNodes.length" class="workflow-flow">
+            <div
+              v-for="(node, index) in workflowNodes"
+              :key="node.key"
+              class="workflow-node-wrap"
+            >
+              <div
+                class="workflow-node"
+                :class="`workflow-node--${node.status}`"
+                :title="node.name"
+              >
+                <div class="workflow-node-top">
+                  <span class="workflow-node-dot">{{ node.statusIcon }}</span>
+                  <span class="workflow-node-step">Step {{ index + 1 }}</span>
+                </div>
+                <div class="workflow-node-name">{{ node.name }}</div>
+                <div class="workflow-node-footer">
+                  <span class="workflow-node-status">{{ node.statusLabel }}</span>
+                  <button
+                    v-if="node.logPath"
+                    class="workflow-log-btn"
+                    @click.stop="openLocalPath(node.logPath)"
+                  >
+                    Log
+                  </button>
+                </div>
+              </div>
+              <div v-if="index < workflowNodes.length - 1" class="workflow-edge"></div>
+            </div>
+          </div>
           <div v-if="commandPreviewSteps.length" class="preview-steps">
             <div v-for="(step, index) in commandPreviewSteps" :key="`${activeTab}-${index}-${step.name}`" class="preview-step-card">
               <div class="preview-step-header">
@@ -274,6 +315,7 @@ const SETTINGS_KEYS = [
   'pushRemotePath',
   'pushUseRunAs',
   'pushPackageName',
+  'pushLaunchAfterPush',
   'showInstallHint',
   'packageName',
   'launchActivity',
@@ -287,6 +329,10 @@ const collapsePathSection = ref(false)
 const terminalEl = ref(null)
 const logs = ref([])
 const lastOutputs = ref(null)
+const stepStates = ref({})
+const stepLogPaths = ref({})
+const activeStepName = ref('')
+const runLogDir = ref('')
 const projectRootDraft = ref(DEFAULT_PROJECT_ROOT)
 const projectRootOptions = ref([DEFAULT_PROJECT_ROOT])
 let ws = null
@@ -304,6 +350,13 @@ const stripTrailingSeparators = (value) => {
     return `${normalized.slice(0, 2)}\\`
   }
   return normalized.replace(/[\\]+$/, '')
+}
+
+const isPathInsideProjectRoot = (path, projectRoot) => {
+  const normalizedPath = stripTrailingSeparators(path).toLowerCase()
+  const normalizedRoot = stripTrailingSeparators(projectRoot).toLowerCase()
+  if (!normalizedPath || !normalizedRoot) return false
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}\\`)
 }
 
 const joinWindowsPath = (...parts) => {
@@ -381,8 +434,9 @@ const createDefaultSettings = (projectRoot = DEFAULT_PROJECT_ROOT) => {
     apkPath: '',
     soPath: buildDefaultSoPath(sharedPaths.projectFile, 'Development', 'arm64-v8a', sharedPaths.projectRoot),
     pushRemotePath: '/data/local/tmp/',
-    pushUseRunAs: false,
+    pushUseRunAs: true,
     pushPackageName: 'com.tencent.tmgp.pubgmhd',
+    pushLaunchAfterPush: true,
     showInstallHint: true,
     packageName: 'com.tencent.tmgp.pubgmhd',
     launchActivity: 'com.epicgames.ue4.SplashActivity',
@@ -405,6 +459,10 @@ const defaultDetectedState = () => ({
 
 const detected = reactive(defaultDetectedState())
 const settings = reactive(createDefaultSettings(DEFAULT_PROJECT_ROOT))
+const visibleWorkflowTabs = [
+  { key: 'buildSo', label: '1) Build SO' },
+  { key: 'pushSo', label: '2) Push SO' },
+]
 
 const cloneSettings = () => {
   const snapshot = {}
@@ -427,10 +485,15 @@ const sanitizeSettingsProfile = (profile, fallbackRoot = DEFAULT_PROJECT_ROOT) =
     }
   }
 
+  if (profile?.pushUseRunAs === false && profile?.pushLaunchAfterPush === undefined) {
+    sanitized.pushUseRunAs = true
+    sanitized.pushLaunchAfterPush = true
+  }
+
   sanitized.projectRoot = resolvedProjectRoot
   const sharedPaths = deriveSharedPaths(resolvedProjectRoot)
   const legacyDefaultSoPath = buildLegacyDefaultSoPath(sharedPaths.projectFile, sanitized.arch, sanitized.projectRoot)
-  if (!sanitized.soPath || sanitized.soPath === legacyDefaultSoPath) {
+  if (!sanitized.soPath || sanitized.soPath === legacyDefaultSoPath || !isPathInsideProjectRoot(sanitized.soPath, sanitized.projectRoot)) {
     sanitized.soPath = buildDefaultSoPath(sharedPaths.projectFile, sanitized.config, sanitized.arch, sanitized.projectRoot)
   }
 
@@ -531,6 +594,63 @@ const createPreviewStep = (name, command, cwd) => ({
   display: cwd ? `(cwd=${cwd}) ${command}` : command,
 })
 
+const createStepKey = (step, index) => `${index}:${step.name}`
+
+const getStepKeysByName = (name) => commandPreviewSteps.value
+  .map((step, index) => ({ key: createStepKey(step, index), name: step.name }))
+  .filter((item) => item.name === name)
+  .map((item) => item.key)
+
+const setStepStatusByName = (name, status) => {
+  const keys = getStepKeysByName(name)
+  if (keys.length === 0) return
+  stepStates.value = {
+    ...stepStates.value,
+    ...Object.fromEntries(keys.map((key) => [key, status])),
+  }
+}
+
+const setStepLogPathByName = (name, logPath) => {
+  if (!logPath) return
+  const keys = getStepKeysByName(name)
+  if (keys.length === 0) return
+  stepLogPaths.value = {
+    ...stepLogPaths.value,
+    ...Object.fromEntries(keys.map((key) => [key, logPath])),
+  }
+}
+
+const resetWorkflowState = () => {
+  stepStates.value = Object.fromEntries(
+    commandPreviewSteps.value.map((step, index) => [createStepKey(step, index), 'pending']),
+  )
+  stepLogPaths.value = {}
+  activeStepName.value = ''
+}
+
+const getWorkflowStatusMeta = (status) => {
+  if (status === 'running') return { label: 'Running', icon: '>' }
+  if (status === 'success') return { label: 'Done', icon: 'OK' }
+  if (status === 'failed') return { label: 'Failed', icon: '!' }
+  if (status === 'stopped') return { label: 'Stopped', icon: 'X' }
+  return { label: 'Pending', icon: '-' }
+}
+
+const openLocalPath = async (path, mode = 'path') => {
+  if (!path) return
+  try {
+    const res = await $fetch('/api/system/open', {
+      method: 'POST',
+      body: { path, mode },
+    })
+    if (!res?.success) {
+      appendLog('stderr', `[error] open failed: ${res?.error || path}\n`)
+    }
+  } catch (error) {
+    appendLog('stderr', `[error] open failed: ${error.message}\n`)
+  }
+}
+
 const archToUbtArg = (arch) => {
   if (arch === 'arm64-v8a') return '-arm64'
   if (arch === 'armeabi-v7a') return '-armv7'
@@ -544,9 +664,20 @@ const aplSnippet = computed(() => {
   return `<soLoadLibrary>\n  <loadLibrary name="${settings.aplLibraryName}" failmsg="${settings.aplFailMessage}" />\n</soLoadLibrary>`
 })
 
-const arm64IniSnippet = `[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]
-bBuildForArmV7=False
-bBuildForArm64=True`
+const getDefaultEngineIniAndroidAbiSettings = (arch) => ({
+  bBuildForArmV7: arch === 'armeabi-v7a' ? 'True' : 'False',
+  bBuildForArm64: arch === 'arm64-v8a' ? 'True' : 'False',
+  bBuildForX86: 'False',
+  bBuildForX8664: arch === 'x86_64' ? 'True' : 'False',
+})
+
+const selectedIniSnippet = computed(() => {
+  const entries = getDefaultEngineIniAndroidAbiSettings(settings.arch)
+  return [
+    '[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]',
+    ...Object.entries(entries).map(([key, value]) => `${key}=${value}`),
+  ].join('\n')
+})
 
 const commandPreviewSteps = computed(() => {
   if (activeTab.value === 'buildSo') {
@@ -560,15 +691,17 @@ const commandPreviewSteps = computed(() => {
     const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultBuildLogPath.value
     const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
     const replaceManagerDir = 'I:\\cgtools\\ReplaceManager\\RevertTool'
-    const replaceManagerScript = `${replaceManagerDir}\\Replace.bat`
-    const replaceManagerCleanScript = `${replaceManagerDir}\\Clean.bat`
+    const replaceManagerSourceDir = 'I:\\cgtools\\ReplaceManager'
+    const replaceManagerTool = `${replaceManagerDir}\\ReplaceManagerTool.py`
     const baseCommand = `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} ${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge`
-    const replaceCommand = `${quote(replaceManagerScript)}`
+    const replaceCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} restore`
+    const iniCommand = `cgtools:update-default-engine-ini -Path=${quote(defaultEngineIniPath.value)} ${Object.entries(getDefaultEngineIniAndroidAbiSettings(settings.arch)).map(([key, value]) => `-${key}=${value}`).join(' ')}`
     const manifestCommand = `${baseCommand} -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
     const buildCommand = `${baseCommand}${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
-    const cleanCommand = `${quote(replaceManagerCleanScript)}`
+    const cleanCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} clean`
 
     return [
+      createPreviewStep('Update DefaultEngine.ini Android ABI', iniCommand, projectDir),
       createPreviewStep('Prepare ReplaceManager patch', replaceCommand, replaceManagerDir),
       createPreviewStep('Generate UBT manifest', manifestCommand, settings.projectRoot),
       createPreviewStep('Build Android SO with UBT', buildCommand, settings.projectRoot),
@@ -615,6 +748,9 @@ const commandPreviewSteps = computed(() => {
         createPreviewStep('Ensure app_lib exists', `adb shell run-as ${packageName} mkdir -p app_lib`),
         createPreviewStep('Copy SO into app_lib', `adb shell run-as ${packageName} cp /data/local/tmp/libUE4.so app_lib/libUE4.so`),
         createPreviewStep('Verify libUE4.so in app_lib', `adb shell run-as ${packageName} ls -l app_lib/libUE4.so`),
+        ...(settings.pushLaunchAfterPush ? [
+          createPreviewStep('Launch package after SO push', `adb shell monkey -p ${packageName} -c android.intent.category.LAUNCHER 1`),
+        ] : []),
       ]
     }
     return [
@@ -627,6 +763,20 @@ const commandPreviewSteps = computed(() => {
 })
 
 const commandPreview = computed(() => commandPreviewSteps.value.map((step) => step.command).join('\n'))
+
+const workflowNodes = computed(() => commandPreviewSteps.value.map((step, index) => {
+  const key = createStepKey(step, index)
+  const status = stepStates.value[key] || 'pending'
+  const meta = getWorkflowStatusMeta(status)
+  return {
+    key,
+    name: step.name,
+    logPath: stepLogPaths.value[key] || '',
+    status,
+    statusLabel: meta.label,
+    statusIcon: meta.icon,
+  }
+}))
 
 const saveCurrentProfile = () => {
   if (isApplyingSettings) return
@@ -675,9 +825,9 @@ const copyPreviewStep = async (step) => {
   appendLog('info', `[info] Step copied: ${step.name}\n`)
 }
 
-const copyArm64IniSnippet = async () => {
-  await copyText(arm64IniSnippet)
-  appendLog('info', '[info] Arm64 DefaultEngine.ini snippet copied.\n')
+const copySelectedIniSnippet = async () => {
+  await copyText(selectedIniSnippet.value)
+  appendLog('info', '[info] DefaultEngine.ini ABI snippet copied.\n')
 }
 
 const refreshProjectDetection = async (projectRoot) => {
@@ -793,18 +943,43 @@ const ensureSocket = () => {
 
       if (data.type === 'start') {
         isRunning.value = true
+        lastOutputs.value = null
+        runLogDir.value = data.runLogDir || ''
         appendLog('info', `[start] ${data.jobType}\n`)
+        if (runLogDir.value) {
+          appendLog('info', `[logs] ${runLogDir.value}\n`)
+        }
       } else if (data.type === 'step') {
+        activeStepName.value = data.name || ''
+        setStepLogPathByName(data.name, data.logPath)
+        setStepStatusByName(data.name, 'running')
         appendLog('info', `[step] ${data.name}\n`)
+      } else if (data.type === 'stepEnd') {
+        setStepLogPathByName(data.name, data.logPath)
+        setStepStatusByName(data.name, data.exitCode === -1 ? 'stopped' : (data.exitCode === 0 ? 'success' : 'failed'))
+        if (activeStepName.value === data.name) {
+          activeStepName.value = ''
+        }
       } else if (data.type === 'stdout') {
-        appendLog('stdout', data.data)
+        if (!activeStepName.value) {
+          appendLog('stdout', data.data)
+        }
       } else if (data.type === 'stderr') {
-        appendLog('stderr', data.data)
+        if (!activeStepName.value || String(data.data || '').startsWith('[terminated]')) {
+          appendLog('stderr', data.data)
+        }
       } else if (data.type === 'error') {
+        if (activeStepName.value) {
+          setStepStatusByName(activeStepName.value, 'failed')
+        }
         appendLog('stderr', `[error] ${data.data}\n`)
       } else if (data.type === 'end') {
         isRunning.value = false
         lastOutputs.value = data.outputs || null
+        if (data.exitCode === -1 && activeStepName.value) {
+          setStepStatusByName(activeStepName.value, 'stopped')
+        }
+        activeStepName.value = ''
         appendLog('info', `[end] exitCode=${data.exitCode}\n`)
         if (data.outputs?.soPath) {
           settings.soPath = data.outputs.soPath
@@ -829,6 +1004,7 @@ const buildPayload = () => {
       projectRoot: settings.projectRoot,
       projectFile: sharedPaths.value.projectFile,
       engineRoot: sharedPaths.value.engineRoot,
+      defaultEngineIniPath: defaultEngineIniPath.value,
       config: settings.config,
       arch: settings.arch,
       logPath: settings.logPath?.trim() || undefined,
@@ -850,6 +1026,7 @@ const buildPayload = () => {
       remotePath: settings.pushRemotePath?.trim() || '/data/local/tmp/',
       useRunAs: settings.pushUseRunAs,
       packageName: settings.pushUseRunAs ? (settings.pushPackageName?.trim() || undefined) : undefined,
+      launchAfterPush: settings.pushUseRunAs ? !!settings.pushLaunchAfterPush : false,
     }
   }
   return {
@@ -868,6 +1045,8 @@ const runActive = async () => {
     const socket = await ensureSocket()
     const payload = buildPayload()
     const jobType = activeTab.value
+    runLogDir.value = ''
+    resetWorkflowState()
     appendLog('info', `[run] ${jobType}\n`)
     socket.send(JSON.stringify({ action: 'run', jobType, payload }))
   } catch (error) {
@@ -878,6 +1057,10 @@ const runActive = async () => {
 const terminateRun = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     return
+  }
+  appendLog('info', '[stop] requested\n')
+  if (activeStepName.value) {
+    setStepStatusByName(activeStepName.value, 'stopped')
   }
   ws.send(JSON.stringify({ action: 'terminate' }))
 }
@@ -896,6 +1079,12 @@ watch(
 )
 
 watch(settings, saveCurrentProfile, { deep: true })
+
+watch(commandPreview, () => {
+  if (!isRunning.value) {
+    resetWorkflowState()
+  }
+})
 
 onMounted(async () => {
   profileStore = readProfileStore()
@@ -1031,6 +1220,159 @@ onMounted(async () => {
   gap: 8px;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+.workflow-flow {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  padding: 4px 0 14px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workflow-node-wrap {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.workflow-node {
+  width: 190px;
+  min-height: 92px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.workflow-node-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-node-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.workflow-node-step {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.workflow-node-name {
+  margin-top: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  min-height: 34px;
+  overflow-wrap: anywhere;
+}
+
+.workflow-node-footer {
+  margin-top: 8px;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-node-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.workflow-log-btn {
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.workflow-log-btn:hover {
+  border-color: rgba(96, 205, 255, 0.65);
+  color: #8bdbff;
+}
+
+.workflow-edge {
+  width: 34px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.22);
+  position: relative;
+}
+
+.workflow-edge::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -4px;
+  border-left: 6px solid rgba(255, 255, 255, 0.22);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.workflow-node--running {
+  border-color: #60cdff;
+  background: rgba(96, 205, 255, 0.12);
+  box-shadow: 0 0 0 1px rgba(96, 205, 255, 0.16);
+}
+
+.workflow-node--success {
+  border-color: rgba(121, 217, 138, 0.75);
+  background: rgba(121, 217, 138, 0.12);
+}
+
+.workflow-node--failed {
+  border-color: rgba(255, 110, 122, 0.85);
+  background: rgba(255, 110, 122, 0.12);
+}
+
+.workflow-node--stopped {
+  border-color: rgba(255, 202, 122, 0.75);
+  background: rgba(255, 202, 122, 0.11);
+}
+
+.workflow-node--running .workflow-node-dot,
+.workflow-node--running .workflow-node-status {
+  color: #8bdbff;
+}
+
+.workflow-node--success .workflow-node-dot,
+.workflow-node--success .workflow-node-status {
+  color: #79d98a;
+}
+
+.workflow-node--failed .workflow-node-dot,
+.workflow-node--failed .workflow-node-status {
+  color: #ff8f9a;
+}
+
+.workflow-node--stopped .workflow-node-dot,
+.workflow-node--stopped .workflow-node-status {
+  color: #ffca7a;
 }
 
 .preview-steps {

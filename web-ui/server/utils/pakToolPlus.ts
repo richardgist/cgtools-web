@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 export const DEFAULT_PROJECT_ROOT = 'E:\\CJGame\\trunk'
-export const DEFAULT_PAK_TOOL_EXE = 'E:\\CJGame\\trunk\\Survive\\Paktools\\CookAndPakAssetPlus\\PakToolPlus.exe'
+export const DEFAULT_PAK_TOOL_EXE = 'E:\\CJGame\\trunk\\Survive\\Paktools\\CookAndPakAsset\\Do.bat'
 export const DEFAULT_PACKAGE_NAME = 'com.tencent.tmgp.pubgmhd'
 export const DEFAULT_GAME_NAME = 'ShadowTrackerExtra'
 export const DEFAULT_PATCH_PREFIX = 'tex_patch_'
@@ -254,22 +254,22 @@ export const createPakPushPlan = (payload: PakPushPayload): PakPushPlan => {
 
 export const buildPakToolPathsFromProjectRoot = (rawProjectRoot = DEFAULT_PROJECT_ROOT): PakToolPaths => {
   const projectRoot = normalizeWindowsPath(rawProjectRoot, DEFAULT_PROJECT_ROOT)
-  const toolDir = path.join(projectRoot, 'Survive', 'Paktools', 'CookAndPakAssetPlus')
-  const exePath = path.join(toolDir, 'PakToolPlus.exe')
+  const toolDir = path.join(projectRoot, 'Survive', 'Paktools', 'CookAndPakAsset')
+  const exePath = path.join(toolDir, 'Do.bat')
 
   return {
     projectRoot,
     exePath,
     toolDir,
-    batPath: path.join(toolDir, 'PakToolPlus.bat'),
+    batPath: exePath,
     tempPaksDir: path.join(toolDir, 'Temp', 'Paks'),
-    mainPyPath: path.join(toolDir, 'src', 'main.py'),
+    mainPyPath: path.join(toolDir, 'Script', 'Do.py'),
   }
 }
 
 const inferProjectRootFromExe = (exePath: string) => {
   const normalizedExePath = normalizeWindowsPath(exePath, DEFAULT_PAK_TOOL_EXE)
-  const marker = '\\Survive\\Paktools\\CookAndPakAssetPlus\\PakToolPlus.exe'
+  const marker = '\\Survive\\Paktools\\CookAndPakAsset\\Do.bat'
   if (normalizedExePath.toLowerCase().endsWith(marker.toLowerCase())) {
     return normalizedExePath.slice(0, -marker.length)
   }
@@ -287,9 +287,9 @@ export const buildPakToolPaths = (rawExePath = DEFAULT_PAK_TOOL_EXE, rawProjectR
     projectRoot,
     exePath,
     toolDir,
-    batPath: path.join(toolDir, 'PakToolPlus.bat'),
+    batPath: exePath.toLowerCase().endsWith('\\do.bat') ? exePath : path.join(toolDir, 'Do.bat'),
     tempPaksDir: path.join(toolDir, 'Temp', 'Paks'),
-    mainPyPath: path.join(toolDir, 'src', 'main.py'),
+    mainPyPath: path.join(toolDir, 'Script', 'Do.py'),
   }
 }
 
@@ -336,16 +336,16 @@ export const validatePakToolLaunch = (rawExePath = DEFAULT_PAK_TOOL_EXE, rawProj
   const errors: string[] = []
 
   if (!status.detected.windows) {
-    errors.push('PakToolPlus 目前仅支持在 Windows 上启动。')
+    errors.push('CookAndPakAsset 目前仅支持在 Windows 上启动。')
   }
   if (!status.detected.projectRootExists) {
     errors.push(`项目 Root 不存在：${status.projectRoot}`)
   }
   if (!status.detected.exeExists) {
-    errors.push(`PakToolPlus.exe 不存在：${status.exePath}`)
+    errors.push(`Do.bat 不存在：${status.exePath}`)
   }
   if (!status.detected.toolDirExists) {
-    errors.push(`PakToolPlus 工具目录不存在：${status.toolDir}`)
+    errors.push(`CookAndPakAsset 工具目录不存在：${status.toolDir}`)
   }
 
   return {

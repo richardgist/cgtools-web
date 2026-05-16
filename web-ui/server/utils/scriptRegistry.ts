@@ -74,7 +74,7 @@ const SCRIPT_PARAMETER_OVERRIDES: Record<string, Record<string, Partial<ScriptPa
     },
     localDir: {
         label: '保存目录',
-        placeholder: '默认保存到 scripts/Stats',
+        placeholder: '默认保存到 PerformanceData/Stats',
     },
     p4Client: {
         label: 'P4 Client',
@@ -99,7 +99,7 @@ const SCRIPT_PARAMETER_OVERRIDES: Record<string, Record<string, Partial<ScriptPa
     },
     localDir: {
         label: '保存目录',
-        placeholder: '默认保存到 scripts/Saved',
+        placeholder: '默认保存到 PerformanceData/Saved',
     },
   },
 }

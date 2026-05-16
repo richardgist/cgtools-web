@@ -5,6 +5,8 @@
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
+    "dev:guarded": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-guarded.ps1",
+    "stop:old-dev": "powershell -ExecutionPolicy Bypass -File ./scripts/stop-old-dev.ps1",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare"

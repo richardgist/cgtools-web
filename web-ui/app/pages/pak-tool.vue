@@ -4,7 +4,7 @@
       <h1 class="header-title">Pak Tool</h1>
       <div class="header-controls">
         <div class="env-chip" :class="status?.detected?.exeExists ? 'ok' : 'bad'">
-          exe: {{ status?.detected?.exeExists ? 'ok' : 'missing' }}
+          entry: {{ status?.detected?.exeExists ? 'ok' : 'missing' }}
         </div>
         <div class="env-chip" :class="status?.detected?.toolDirExists ? 'ok' : 'bad'">
           dir: {{ status?.detected?.toolDirExists ? 'ok' : 'missing' }}
@@ -38,7 +38,7 @@
               </div>
             </div>
             <div class="field-row">
-              <label>PakToolPlus.exe</label>
+              <label>启动入口</label>
               <input :value="status?.exePath || derivedExePath" class="fluent-input path-input" readonly />
               <button class="fluent-btn sub" :disabled="!status?.detected?.exeExists" @click="openPath(status?.exePath, 'path')">打开</button>
             </div>
@@ -66,7 +66,7 @@
         <div class="card-body">
           <div class="action-row">
             <button class="fluent-btn primary" :disabled="isLaunching || !status?.detected?.exeExists" @click="launchTool">
-              {{ isLaunching ? '启动中' : '启动 PakToolPlus' }}
+              {{ isLaunching ? '启动中' : '启动 CookAndPakAsset' }}
             </button>
             <button class="fluent-btn" :disabled="isLaunching" @click="resetDefault">恢复默认 Root</button>
           </div>
@@ -115,7 +115,7 @@
               <strong>{{ status?.detected?.windows ? 'ok' : 'missing' }}</strong>
             </div>
             <div class="status-item" :class="status?.detected?.batExists ? 'ok' : 'warn'">
-              <span>PakToolPlus.bat</span>
+              <span>Do.bat</span>
               <strong>{{ status?.detected?.batExists ? 'ok' : 'optional' }}</strong>
             </div>
             <div class="status-item" :class="status?.detected?.tempPaksDirExists ? 'ok' : 'warn'">
@@ -172,7 +172,7 @@ const normalizeRoot = (value) => {
 }
 
 const normalizedProjectRoot = computed(() => normalizeRoot(projectRoot.value))
-const derivedExePath = computed(() => `${normalizedProjectRoot.value}\\Survive\\Paktools\\CookAndPakAssetPlus\\PakToolPlus.exe`)
+const derivedExePath = computed(() => `${normalizedProjectRoot.value}\\Survive\\Paktools\\CookAndPakAsset\\Do.bat`)
 const remoteSavedPaksDir = computed(() => {
   const resolvedPackageName = packageName.value.trim() || DEFAULT_PACKAGE_NAME
   return `/sdcard/Android/data/${resolvedPackageName}/files/UE4Game/${DEFAULT_GAME_NAME}/${DEFAULT_GAME_NAME}/Saved/Paks`
@@ -279,7 +279,7 @@ const launchTool = async () => {
       body: { projectRoot: normalizedProjectRoot.value },
     })
     if (res?.success) {
-      appendLog('info', `[start] PakToolPlus 已启动 pid=${res.pid || '-'}\n`)
+      appendLog('info', `[start] CookAndPakAsset 已启动 pid=${res.pid || '-'}\n`)
     } else {
       appendLog('stderr', `[error] 启动失败：${res?.error || '未知错误'}\n`)
     }
@@ -370,7 +370,7 @@ const resetDefault = async () => {
 }
 
 const inferProjectRootFromLegacyExe = (exePath) => {
-  const marker = '\\Survive\\Paktools\\CookAndPakAssetPlus\\PakToolPlus.exe'
+  const marker = '\\Survive\\Paktools\\CookAndPakAsset\\Do.bat'
   const normalized = String(exePath || '').trim().replace(/\//g, '\\')
   if (normalized.toLowerCase().endsWith(marker.toLowerCase())) {
     return normalized.slice(0, -marker.length)

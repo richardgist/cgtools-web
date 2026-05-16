@@ -8,7 +8,8 @@ REM Android log file path
 set ANDROID_LOG_FILE=/sdcard/Android/data/com.tencent.tmgp.pubgmhd/files/UE4Game/ShadowTrackerExtra/ShadowTrackerExtra/Saved/Logs/ShadowTrackerExtra.log
 
 REM Local save directory
-set LOCAL_DIR=%~dp0Logs
+for %%I in ("%~dp0..") do set "REPO_ROOT=%%~fI"
+set "LOCAL_DIR=%REPO_ROOT%\PerformanceData\Logs"
 
 REM Create local log directory if not exists
 if not exist "%LOCAL_DIR%" (

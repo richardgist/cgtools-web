@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -84,17 +85,54 @@ try {
     versionUpdateText: 'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
     p4SyncPaths: [path.join(projectDir, 'Source')],
     p4Parallel: true,
+    dryRun: true,
   })
 
   assert.deepEqual(updatePlan.steps.map((step) => step.name), ['Update Assets (P4)', 'Update SVN'])
-  assert(updatePlan.preview.includes('svn update -r 1466919'))
   assert(updatePlan.preview.includes('5996991'))
   assert.equal(updatePlan.steps[0]?.cmd, 'python')
-  assert(updatePlan.preview.includes('update-assets-p4.py'))
-  assert(updatePlan.preview.includes('--merged-p4-head 5996891'))
-  assert(updatePlan.preview.includes('--p4-merge-json'))
+  assert.equal(updatePlan.steps[1]?.cmd, 'python')
+  assert(updatePlan.preview.includes('update-code-assets.py'))
+  assert(updatePlan.preview.includes('--version-text'))
+  assert(updatePlan.preview.includes('--step p4'))
+  assert(updatePlan.preview.includes('--step svn'))
+  assert(updatePlan.preview.includes('--dry-run'))
   assert(!updatePlan.preview.includes('function Invoke-P4SyncMany'))
+  assert(!updatePlan.preview.includes('$svnUrl ='))
+  assert(!updatePlan.preview.includes('svn update -r 1466919'))
   assert(!updatePlan.preview.includes('powershell.exe -NoProfile -ExecutionPolicy Bypass -File'))
+
+  const updateScriptPath = path.resolve(process.cwd(), 'server', 'scripts', 'update-code-assets.py')
+  const dryRunResult = spawnSync('python', [
+    updateScriptPath,
+    '--step',
+    'svn',
+    '--version-text',
+    'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
+    '--svn-update-path',
+    projectDir,
+    '--p4-sync-paths-json',
+    JSON.stringify([path.join(projectDir, 'Source')]),
+    '--dry-run',
+  ], { cwd: tempRoot, encoding: 'utf-8' })
+  assert.equal(dryRunResult.status, 0)
+  assert(dryRunResult.stdout.includes('[dry-run] svn update -r 1466919'))
+  assert(dryRunResult.stdout.includes('[dry-run] svn merge -c 1466941'))
+
+  const p4DryRunResult = spawnSync('python', [
+    updateScriptPath,
+    '--step',
+    'p4',
+    '--version-text',
+    'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
+    '--p4-sync-paths-json',
+    JSON.stringify([path.join(projectDir, 'Source')]),
+    '--dry-run',
+  ], { cwd: tempRoot, encoding: 'utf-8' })
+  assert.equal(p4DryRunResult.status, 0)
+  assert(p4DryRunResult.stdout.includes('[dry-run] p4 sync'))
+  assert(p4DryRunResult.stdout.includes('@5996891'))
+  assert(p4DryRunResult.stdout.includes('@=5996991'))
 
   const fullBuildPlan = buildAndroidSoJobPlan('buildSo', {
     projectRoot: tempRoot,

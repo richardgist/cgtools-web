@@ -97,6 +97,10 @@
                 <input v-model="settings.p4Parallel" type="checkbox" />
                 Sync P4 safe paths in parallel
               </label>
+              <label class="check-line">
+                <input v-model="settings.versionUpdateDryRun" type="checkbox" />
+                Dry run only
+              </label>
               <div class="hint-line">
                 Parsed: P4 <code>{{ parsedVersionUpdate.mergedP4Head || '-' }}</code>,
                 SVN <code>{{ parsedVersionUpdate.mergedSvnHead || '-' }}</code>,
@@ -351,6 +355,7 @@ const SETTINGS_KEYS = [
   'versionUpdateText',
   'p4SyncPathsText',
   'p4Parallel',
+  'versionUpdateDryRun',
   'config',
   'arch',
   'logPath',
@@ -482,6 +487,7 @@ const createDefaultSettings = (projectRoot = DEFAULT_PROJECT_ROOT) => {
     versionUpdateText: '',
     p4SyncPathsText: '',
     p4Parallel: true,
+    versionUpdateDryRun: false,
     config: 'Development',
     arch: 'arm64-v8a',
     logPath: '',
@@ -551,6 +557,7 @@ const sanitizeSettingsProfile = (profile, fallbackRoot = DEFAULT_PROJECT_ROOT) =
   sanitized.versionUpdateText = sanitized.versionUpdateText || ''
   sanitized.p4SyncPathsText = sanitized.p4SyncPathsText || ''
   sanitized.p4Parallel = sanitized.p4Parallel !== false
+  sanitized.versionUpdateDryRun = sanitized.versionUpdateDryRun === true
 
   sanitized.projectRoot = resolvedProjectRoot
   const sharedPaths = deriveSharedPaths(resolvedProjectRoot)
@@ -782,6 +789,7 @@ const buildVersionUpdatePreviewSteps = () => {
         parsed.mergedP4Head ? `p4 sync <safe-path>\\...@${parsed.mergedP4Head}` : 'p4 base: <MergedP4Head missing, skip base sync>',
         ...(parsed.p4Merge.length ? parsed.p4Merge.map((change) => `p4 sync <safe-path>\\...@=${change}`) : ['p4 merges: <P4Merge missing, skip single changes>']),
         settings.p4Parallel ? 'parallel: enabled for multiple safe paths' : 'parallel: disabled',
+        settings.versionUpdateDryRun ? 'dry-run: enabled, commands will only be printed' : 'dry-run: disabled',
       ].join('\n'),
       settings.projectRoot,
     ),
@@ -790,6 +798,7 @@ const buildVersionUpdatePreviewSteps = () => {
       [
         parsed.mergedSvnHead ? `svn update -r ${parsed.mergedSvnHead} ${quote(projectDir)} --non-interactive` : 'svn base: <MergedSvnHead missing, skip update>',
         ...(parsed.svnMerge.length ? parsed.svnMerge.map((revision) => `svn merge -c ${revision} <svn-url> ${quote(projectDir)} --non-interactive --accept postpone`) : ['svn merges: <SVNMerge missing, skip merges>']),
+        settings.versionUpdateDryRun ? 'dry-run: enabled, commands will only be printed' : 'dry-run: disabled',
       ].join('\n'),
       projectDir,
     ),
@@ -1151,6 +1160,7 @@ const buildPayload = () => {
       svnUpdatePath: sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, ''),
       p4SyncPaths: parseP4SyncPathsText(settings.p4SyncPathsText),
       p4Parallel: settings.p4Parallel !== false,
+      dryRun: settings.versionUpdateDryRun === true,
     }
   }
   if (activeTab.value === 'buildSo') {

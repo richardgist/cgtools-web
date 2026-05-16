@@ -15,10 +15,11 @@ export interface UpdateCodeAssetsPayload {
   svnUpdatePath?: string
   p4SyncPaths?: string[]
   p4Parallel?: boolean
+  dryRun?: boolean
 }
 
 const SAFE_P4_CHILD_DIR_EXCLUDES = new Set(['.git', '.svn', 'Binaries', 'DerivedDataCache', 'Intermediate', 'Saved'])
-const UPDATE_ASSETS_P4_SCRIPT = path.resolve(process.cwd(), 'server', 'scripts', 'update-assets-p4.py')
+const UPDATE_CODE_ASSETS_SCRIPT = path.resolve(process.cwd(), 'server', 'scripts', 'update-code-assets.py')
 
 const quoteArg = (value: string) => {
   if (value.length === 0) return '""'
@@ -29,8 +30,6 @@ const renderCommand = (cmd: string, args: string[], cwd?: string) => {
   const commandLine = [quoteArg(cmd), ...args.map(quoteArg)].join(' ')
   return cwd ? `(cwd=${cwd}) ${commandLine}` : commandLine
 }
-
-const quotePowerShell = (value: string) => `'${String(value).replace(/'/g, "''")}'`
 
 const addValidation = (errors: string[], condition: boolean, message: string) => {
   if (!condition) {
@@ -83,50 +82,31 @@ const normalizeP4SyncPaths = (projectDir: string, projectRoot: string, requested
   return [...new Set(childDirs)]
 }
 
-const buildP4VersionSyncArgs = (
-  versionInfo: BuildVersionUpdateInfo,
+const buildVersionUpdateArgs = (
+  step: 'p4' | 'svn',
+  versionUpdateText: string,
+  svnUpdatePath: string,
   p4SyncPaths: string[],
   useParallel: boolean,
+  dryRun: boolean,
 ) => {
-  return [
-    UPDATE_ASSETS_P4_SCRIPT,
-    '--merged-p4-head',
-    versionInfo.mergedP4Head,
-    '--p4-merge-json',
-    JSON.stringify(versionInfo.p4Merge),
+  const args = [
+    UPDATE_CODE_ASSETS_SCRIPT,
+    '--step',
+    step,
+    '--version-text',
+    versionUpdateText,
+    '--svn-update-path',
+    svnUpdatePath,
     '--p4-sync-paths-json',
     JSON.stringify(p4SyncPaths),
     '--parallel',
     useParallel ? 'true' : 'false',
   ]
-}
-
-const buildSvnVersionSyncScript = (versionInfo: BuildVersionUpdateInfo, svnUpdatePath: string) => {
-  const lines = [
-    '$ErrorActionPreference = "Stop"',
-    '$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()',
-    `$svnPath = ${quotePowerShell(svnUpdatePath)}`,
-    '$svnUrl = (& svn info --show-item url $svnPath)',
-    'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
-  ]
-
-  if (versionInfo.mergedSvnHead) {
-    lines.push(
-      `Write-Host "[version] SVN update $svnPath to r${versionInfo.mergedSvnHead}"`,
-      `& svn update -r ${versionInfo.mergedSvnHead} $svnPath --non-interactive`,
-      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
-    )
+  if (dryRun) {
+    args.push('--dry-run')
   }
-
-  for (const revision of versionInfo.svnMerge) {
-    lines.push(
-      `Write-Host "[version] SVN merge -c ${revision} from $svnUrl"`,
-      `& svn merge -c ${revision} $svnUrl $svnPath --non-interactive --accept postpone`,
-      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
-    )
-  }
-
-  return lines.join('; ')
+  return args
 }
 
 export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): JobPlan => {
@@ -144,7 +124,7 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   addValidation(errors, fs.existsSync(projectRoot), `projectRoot not found: ${projectRoot}`)
   addValidation(errors, fs.existsSync(projectDir), `SVN update path not found: ${projectDir}`)
   addValidation(errors, hasAssetVersions || hasSvnVersions, 'Version update text did not contain MergedP4Head/MergedSvnHead/P4Merge/SVNMerge.')
-  addValidation(errors, fs.existsSync(UPDATE_ASSETS_P4_SCRIPT), `P4 update script not found: ${UPDATE_ASSETS_P4_SCRIPT}`)
+  addValidation(errors, fs.existsSync(UPDATE_CODE_ASSETS_SCRIPT), `Version update script not found: ${UPDATE_CODE_ASSETS_SCRIPT}`)
 
   if (hasAssetVersions) {
     addValidation(errors, p4SyncPaths.length > 0, 'No safe P4 sync paths found. Configure p4SyncPaths instead of syncing the outer project directory.')
@@ -155,19 +135,15 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
 
   steps.push({
     name: 'Update Assets (P4)',
-    cmd: hasAssetVersions ? 'python' : 'powershell.exe',
-    args: hasAssetVersions
-      ? buildP4VersionSyncArgs(versionInfo, p4SyncPaths, payload.p4Parallel !== false)
-      : ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'Write-Host "[version] No P4 asset revisions found; skipping."'],
+    cmd: 'python',
+    args: buildVersionUpdateArgs('p4', payload.versionUpdateText || '', projectDir, p4SyncPaths, payload.p4Parallel !== false, payload.dryRun === true),
     cwd: projectRoot,
   })
 
   steps.push({
     name: 'Update SVN',
-    cmd: 'powershell.exe',
-    args: hasSvnVersions
-      ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', buildSvnVersionSyncScript(versionInfo, projectDir)]
-      : ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'Write-Host "[version] No SVN revisions found; skipping."'],
+    cmd: 'python',
+    args: buildVersionUpdateArgs('svn', payload.versionUpdateText || '', projectDir, p4SyncPaths, payload.p4Parallel !== false, payload.dryRun === true),
     cwd: projectDir,
   })
 

@@ -90,7 +90,7 @@
                 <textarea
                   v-model="settings.p4SyncPathsText"
                   class="fluent-input path-input p4-paths-textarea"
-                  placeholder="默认会拆分 Survive 下的一层子目录；也可以每行写一个安全路径，例如 Survive\Source"
+                  placeholder="每行一个安全路径，例如 Survive\Source 或 UE4181；Survive\Content 会自动按下一层子目录拆开"
                 ></textarea>
               </div>
               <label class="check-line">
@@ -107,7 +107,7 @@
                 P4Merge <code>{{ parsedVersionUpdate.p4Merge.join(', ') || '-' }}</code>,
                 SVNMerge <code>{{ parsedVersionUpdate.svnMerge.join(', ') || '-' }}</code>
               </div>
-              <div class="hint-line warn">Update runs as two independent nodes: assets by P4 first, then SVN. P4 never syncs the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory directly.</div>
+              <div class="hint-line warn">Update runs as two independent nodes: assets by P4 first, then SVN. P4 paths come from this config or the default safe subdirs; <code>Survive\Content</code> is split by subdir, and the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory is never synced directly.</div>
             </div>
           </div>
 
@@ -778,8 +778,8 @@ const buildVersionUpdatePreviewSteps = () => {
   const projectDir = sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, '')
   const configuredP4Paths = parseP4SyncPathsText(settings.p4SyncPathsText)
   const p4PathLabel = configuredP4Paths.length
-    ? configuredP4Paths.join('; ')
-    : `${projectDir}\\<child-dirs except .svn/.git/Saved/Intermediate/Binaries>`
+    ? `${configuredP4Paths.join('; ')} (Content expands to child dirs)`
+    : `${projectDir}\\<safe child dirs; Content expands to child dirs>`
 
   return [
     createPreviewStep(

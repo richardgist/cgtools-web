@@ -60,6 +60,26 @@ export const parseBuildVersionUpdateText = (text: string): BuildVersionUpdateInf
   }
 }
 
+const isSafeP4ChildDir = (entry: fs.Dirent) => entry.isDirectory() && !SAFE_P4_CHILD_DIR_EXCLUDES.has(entry.name)
+
+const listSafeP4ChildDirs = (dir: string) => {
+  if (!fs.existsSync(dir)) {
+    return []
+  }
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter(isSafeP4ChildDir)
+    .map((entry) => path.join(dir, entry.name))
+}
+
+const expandP4SyncPath = (syncPath: string) => {
+  const normalizedPath = path.normalize(syncPath)
+  // Content 目录文件量大且容易触发外层目录锁问题，按一层子目录拆开独立同步。
+  if (path.basename(normalizedPath).toLowerCase() === 'content' && fs.existsSync(normalizedPath)) {
+    return listSafeP4ChildDirs(normalizedPath)
+  }
+  return [normalizedPath]
+}
+
 const normalizeP4SyncPaths = (projectDir: string, projectRoot: string, requestedPaths?: string[]) => {
   const explicitPaths = (requestedPaths || [])
     .map((item) => String(item || '').trim())
@@ -67,19 +87,15 @@ const normalizeP4SyncPaths = (projectDir: string, projectRoot: string, requested
     .map((item) => path.isAbsolute(item) ? item : path.join(projectRoot || '', item))
 
   if (explicitPaths.length > 0) {
-    return [...new Set(explicitPaths.map((item) => path.normalize(item)))]
+    return [...new Set(explicitPaths.flatMap(expandP4SyncPath))]
   }
 
   if (!fs.existsSync(projectDir)) {
     return []
   }
 
-  // P4 不能直接同步 Survive 外层目录；默认拆成一层子目录，并避开构建产物和版本控制目录。
-  const childDirs = fs.readdirSync(projectDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !SAFE_P4_CHILD_DIR_EXCLUDES.has(entry.name))
-    .map((entry) => path.join(projectDir, entry.name))
-
-  return [...new Set(childDirs)]
+  // P4 不能直接同步 Survive 外层目录；默认拆成一层子目录，并对 Content 再拆一层。
+  return [...new Set(listSafeP4ChildDirs(projectDir).flatMap(expandP4SyncPath))]
 }
 
 const buildVersionUpdateArgs = (

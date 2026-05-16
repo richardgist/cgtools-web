@@ -78,6 +78,9 @@ try {
 
   const projectDir = path.join(tempRoot, 'Survive')
   fs.mkdirSync(path.join(projectDir, 'Source'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Content', 'Maps'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Content', 'UI'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Content', '.svn'), { recursive: true })
   fs.writeFileSync(path.join(projectDir, 'ShadowTrackerExtra.uproject'), '{}', 'utf-8')
   fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Engine'), { recursive: true })
   const updatePlan = buildAndroidSoJobPlan('updateCodeAssets', {
@@ -133,6 +136,33 @@ try {
   assert(p4DryRunResult.stdout.includes('[dry-run] p4 sync'))
   assert(p4DryRunResult.stdout.includes('@5996891'))
   assert(p4DryRunResult.stdout.includes('@=5996991'))
+
+  const configuredContentPlan = buildAndroidSoJobPlan('updateCodeAssets', {
+    projectRoot: tempRoot,
+    versionUpdateText: 'MergedP4Head：5996891',
+    p4SyncPaths: [
+      path.join(projectDir, 'Content'),
+      'UE4181',
+    ],
+  })
+  const configuredP4PathsJson = configuredContentPlan.steps[0]?.args[configuredContentPlan.steps[0]?.args.indexOf('--p4-sync-paths-json') + 1] || '[]'
+  const configuredP4Paths = JSON.parse(configuredP4PathsJson)
+  assert(configuredP4Paths.includes(path.join(projectDir, 'Content', 'Maps')))
+  assert(configuredP4Paths.includes(path.join(projectDir, 'Content', 'UI')))
+  assert(configuredP4Paths.includes(path.join(tempRoot, 'UE4181')))
+  assert(!configuredP4Paths.includes(path.join(projectDir, 'Content')))
+  assert(!configuredP4Paths.includes(path.join(projectDir, 'Content', '.svn')))
+
+  const defaultContentPlan = buildAndroidSoJobPlan('updateCodeAssets', {
+    projectRoot: tempRoot,
+    versionUpdateText: 'MergedP4Head：5996891',
+  })
+  const defaultP4PathsJson = defaultContentPlan.steps[0]?.args[defaultContentPlan.steps[0]?.args.indexOf('--p4-sync-paths-json') + 1] || '[]'
+  const defaultP4Paths = JSON.parse(defaultP4PathsJson)
+  assert(defaultP4Paths.includes(path.join(projectDir, 'Source')))
+  assert(defaultP4Paths.includes(path.join(projectDir, 'Content', 'Maps')))
+  assert(defaultP4Paths.includes(path.join(projectDir, 'Content', 'UI')))
+  assert(!defaultP4Paths.includes(path.join(projectDir, 'Content')))
 
   const fullBuildPlan = buildAndroidSoJobPlan('buildSo', {
     projectRoot: tempRoot,

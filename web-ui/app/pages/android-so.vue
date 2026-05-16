@@ -85,14 +85,11 @@
                   placeholder="【CG】每日转测试版本（MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969）"
                 ></textarea>
               </div>
-              <div class="field-row textarea-row">
+              <div class="field-row">
                 <label>P4 Safe Paths</label>
-                <textarea
-                  v-model="settings.p4SyncPathsText"
-                  class="fluent-input path-input p4-paths-textarea"
-                  placeholder="每行一个安全路径，例如 Survive\Source 或 UE4181；Survive\Content 会自动按下一层子目录拆开"
-                ></textarea>
+                <input :value="SAFE_PATHS_INI_PATH" class="fluent-input path-input" readonly />
               </div>
+              <div class="hint-line">Safe paths are loaded from INI. Use <code>+Paths=</code> for update dirs and <code>+ExpandChildren=</code> for dirs that must be split by child directory.</div>
               <label class="check-line">
                 <input v-model="settings.p4Parallel" type="checkbox" />
                 Sync P4 safe paths in parallel
@@ -107,7 +104,7 @@
                 P4Merge <code>{{ parsedVersionUpdate.p4Merge.join(', ') || '-' }}</code>,
                 SVNMerge <code>{{ parsedVersionUpdate.svnMerge.join(', ') || '-' }}</code>
               </div>
-              <div class="hint-line warn">Update runs as two independent nodes: assets by P4 first, then SVN. P4 paths come from this config or the default safe subdirs; <code>Survive\Content</code> is split by subdir, and the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory is never synced directly.</div>
+              <div class="hint-line warn">Update runs as two independent nodes: assets by P4 first, then SVN. P4 paths come only from the INI config; dirs listed in <code>+ExpandChildren</code> are split by subdir, and the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory is never synced directly.</div>
             </div>
           </div>
 
@@ -349,11 +346,11 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 const LEGACY_STORAGE_KEY = 'cgtools_android_so_settings_v1'
 const STORAGE_KEY = 'cgtools_android_so_profiles_v2'
 const DEFAULT_PROJECT_ROOT = 'C:\\CJGame\\PRE418'
+const SAFE_PATHS_INI_PATH = 'web-ui/server/config/android-so-update-paths.ini'
 const SETTINGS_KEYS = [
   'projectRoot',
   'buildMode',
   'versionUpdateText',
-  'p4SyncPathsText',
   'p4Parallel',
   'versionUpdateDryRun',
   'config',
@@ -485,7 +482,6 @@ const createDefaultSettings = (projectRoot = DEFAULT_PROJECT_ROOT) => {
     projectRoot: sharedPaths.projectRoot,
     buildMode: 'full',
     versionUpdateText: '',
-    p4SyncPathsText: '',
     p4Parallel: true,
     versionUpdateDryRun: false,
     config: 'Development',
@@ -555,7 +551,6 @@ const sanitizeSettingsProfile = (profile, fallbackRoot = DEFAULT_PROJECT_ROOT) =
     sanitized.buildMode = 'full'
   }
   sanitized.versionUpdateText = sanitized.versionUpdateText || ''
-  sanitized.p4SyncPathsText = sanitized.p4SyncPathsText || ''
   sanitized.p4Parallel = sanitized.p4Parallel !== false
   sanitized.versionUpdateDryRun = sanitized.versionUpdateDryRun === true
 
@@ -758,11 +753,6 @@ const parseBuildVersionUpdateText = (text) => {
   }
 }
 
-const parseP4SyncPathsText = (text) => String(text || '')
-  .split(/\r?\n|;/)
-  .map((item) => item.trim())
-  .filter(Boolean)
-
 const parsedVersionUpdate = computed(() => parseBuildVersionUpdateText(settings.versionUpdateText))
 
 const selectedIniSnippet = computed(() => {
@@ -776,10 +766,7 @@ const selectedIniSnippet = computed(() => {
 const buildVersionUpdatePreviewSteps = () => {
   const parsed = parsedVersionUpdate.value
   const projectDir = sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, '')
-  const configuredP4Paths = parseP4SyncPathsText(settings.p4SyncPathsText)
-  const p4PathLabel = configuredP4Paths.length
-    ? `${configuredP4Paths.join('; ')} (Content expands to child dirs)`
-    : `${projectDir}\\<safe child dirs; Content expands to child dirs>`
+  const p4PathLabel = `${SAFE_PATHS_INI_PATH} (+Paths / +ExpandChildren)`
 
   return [
     createPreviewStep(
@@ -1158,7 +1145,6 @@ const buildPayload = () => {
       projectRoot: settings.projectRoot,
       versionUpdateText: settings.versionUpdateText,
       svnUpdatePath: sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, ''),
-      p4SyncPaths: parseP4SyncPathsText(settings.p4SyncPathsText),
       p4Parallel: settings.p4Parallel !== false,
       dryRun: settings.versionUpdateDryRun === true,
     }

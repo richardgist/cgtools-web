@@ -8,7 +8,10 @@ import {
   formatDefaultEngineIniSnippet,
   updateDefaultEngineIniAndroidAbi,
 } from '../androidSoCommands'
-import { parseBuildVersionUpdateText } from '../versionUpdateCommands'
+import {
+  parseBuildVersionUpdateText,
+  resolveP4SyncPathsFromIniText,
+} from '../versionUpdateCommands'
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cgtools-android-so-'))
 
@@ -81,8 +84,40 @@ try {
   fs.mkdirSync(path.join(projectDir, 'Content', 'Maps'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Content', 'UI'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Content', '.svn'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Content', 'Saved'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Saved'), { recursive: true })
   fs.writeFileSync(path.join(projectDir, 'ShadowTrackerExtra.uproject'), '{}', 'utf-8')
-  fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Engine'), { recursive: true })
+  fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Engine', 'Source'), { recursive: true })
+
+  const configuredIniText = [
+    '[Root:Survive]',
+    'Base=Survive',
+    '+Paths=Source',
+    '+Paths=Content',
+    '+Paths=Saved',
+    '+ExpandChildren=Content',
+    '',
+    '[Root:UE4181]',
+    'Base=UE4181',
+    '+Paths=Engine\\Source',
+    '',
+    '[Exclude]',
+    '+ChildDirs=.git',
+    '+ChildDirs=.svn',
+    '+ChildDirs=Saved',
+    '+ChildDirs=Intermediate',
+    '+ChildDirs=Binaries',
+    '+ChildDirs=DerivedDataCache',
+  ].join('\n')
+  const resolvedIniPaths = resolveP4SyncPathsFromIniText(configuredIniText, tempRoot)
+  assert(resolvedIniPaths.includes(path.join(projectDir, 'Source')))
+  assert(resolvedIniPaths.includes(path.join(projectDir, 'Content', 'Maps')))
+  assert(resolvedIniPaths.includes(path.join(projectDir, 'Content', 'UI')))
+  assert(resolvedIniPaths.includes(path.join(projectDir, 'Saved')))
+  assert(resolvedIniPaths.includes(path.join(tempRoot, 'UE4181', 'Engine', 'Source')))
+  assert(!resolvedIniPaths.includes(path.join(projectDir, 'Content')))
+  assert(!resolvedIniPaths.includes(path.join(projectDir, 'Content', '.svn')))
+  assert(!resolvedIniPaths.includes(path.join(projectDir, 'Content', 'Saved')))
   const updatePlan = buildAndroidSoJobPlan('updateCodeAssets', {
     projectRoot: tempRoot,
     versionUpdateText: 'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
@@ -142,14 +177,15 @@ try {
     versionUpdateText: 'MergedP4Head：5996891',
     p4SyncPaths: [
       path.join(projectDir, 'Content'),
-      'UE4181',
+      path.join(tempRoot, 'DoesNotMatter'),
     ],
   })
   const configuredP4PathsJson = configuredContentPlan.steps[0]?.args[configuredContentPlan.steps[0]?.args.indexOf('--p4-sync-paths-json') + 1] || '[]'
   const configuredP4Paths = JSON.parse(configuredP4PathsJson)
+  assert(configuredP4Paths.includes(path.join(projectDir, 'Source')))
   assert(configuredP4Paths.includes(path.join(projectDir, 'Content', 'Maps')))
   assert(configuredP4Paths.includes(path.join(projectDir, 'Content', 'UI')))
-  assert(configuredP4Paths.includes(path.join(tempRoot, 'UE4181')))
+  assert(!configuredP4Paths.includes(path.join(tempRoot, 'DoesNotMatter')))
   assert(!configuredP4Paths.includes(path.join(projectDir, 'Content')))
   assert(!configuredP4Paths.includes(path.join(projectDir, 'Content', '.svn')))
 

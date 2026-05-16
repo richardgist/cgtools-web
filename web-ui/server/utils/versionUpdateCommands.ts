@@ -13,13 +13,12 @@ export interface UpdateCodeAssetsPayload {
   projectRoot: string
   versionUpdateText: string
   svnUpdatePath?: string
-  p4SyncPaths?: string[]
   p4Parallel?: boolean
   dryRun?: boolean
 }
 
-const SAFE_P4_CHILD_DIR_EXCLUDES = new Set(['.git', '.svn', 'Binaries', 'DerivedDataCache', 'Intermediate', 'Saved'])
 const UPDATE_CODE_ASSETS_SCRIPT = path.resolve(process.cwd(), 'server', 'scripts', 'update-code-assets.py')
+const UPDATE_CODE_ASSETS_PATHS_INI = path.resolve(process.cwd(), 'server', 'config', 'android-so-update-paths.ini')
 
 const quoteArg = (value: string) => {
   if (value.length === 0) return '""'
@@ -60,42 +59,117 @@ export const parseBuildVersionUpdateText = (text: string): BuildVersionUpdateInf
   }
 }
 
-const isSafeP4ChildDir = (entry: fs.Dirent) => entry.isDirectory() && !SAFE_P4_CHILD_DIR_EXCLUDES.has(entry.name)
+interface P4SafePathsRootConfig {
+  name: string
+  base: string
+  paths: string[]
+  expandChildren: string[]
+}
 
-const listSafeP4ChildDirs = (dir: string) => {
+interface P4SafePathsIniConfig {
+  roots: P4SafePathsRootConfig[]
+  excludeChildDirs: string[]
+}
+
+type RawIniSection = Record<string, string | string[]>
+type RawIni = Record<string, RawIniSection>
+
+const asIniArray = (value: string | string[] | undefined) => {
+  if (Array.isArray(value)) return value.map((item) => item.trim()).filter(Boolean)
+  return typeof value === 'string' && value.trim() ? [value.trim()] : []
+}
+
+const parseP4SafePathsIni = (text: string): P4SafePathsIniConfig => {
+  const rawIni: RawIni = {}
+  let currentSection = ''
+
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#') || line.startsWith(';')) {
+      continue
+    }
+
+    const sectionMatch = line.match(/^\[([^\]]+)\]$/)
+    if (sectionMatch) {
+      currentSection = sectionMatch[1].trim()
+      rawIni[currentSection] ||= {}
+      continue
+    }
+
+    const keyMatch = line.match(/^(\+?[^=]+)=(.*)$/)
+    if (!keyMatch || !currentSection) {
+      continue
+    }
+
+    const isArrayEntry = keyMatch[1].trim().startsWith('+')
+    const key = keyMatch[1].trim().replace(/^\+/, '')
+    const value = keyMatch[2].trim()
+    rawIni[currentSection] ||= {}
+    if (isArrayEntry) {
+      const previous = rawIni[currentSection][key]
+      rawIni[currentSection][key] = [...asIniArray(previous), value].filter(Boolean)
+    } else {
+      rawIni[currentSection][key] = value
+    }
+  }
+
+  const roots = Object.entries(rawIni)
+    .filter(([sectionName]) => sectionName.toLowerCase().startsWith('root:'))
+    .map(([sectionName, section]) => ({
+      name: sectionName.slice('Root:'.length),
+      base: typeof section.Base === 'string' ? section.Base.trim() : '',
+      paths: asIniArray(section.Paths),
+      expandChildren: asIniArray(section.ExpandChildren),
+    }))
+    .filter((root) => root.base)
+
+  return {
+    roots,
+    excludeChildDirs: asIniArray(rawIni.Exclude?.ChildDirs),
+  }
+}
+
+const isSafeP4ChildDir = (entry: fs.Dirent, excludedNames: Set<string>) => entry.isDirectory() && !excludedNames.has(entry.name.toLowerCase())
+
+const listSafeP4ChildDirs = (dir: string, excludedNames: Set<string>) => {
   if (!fs.existsSync(dir)) {
     return []
   }
   return fs.readdirSync(dir, { withFileTypes: true })
-    .filter(isSafeP4ChildDir)
+    .filter((entry) => isSafeP4ChildDir(entry, excludedNames))
     .map((entry) => path.join(dir, entry.name))
 }
 
-const expandP4SyncPath = (syncPath: string) => {
+const normalizeRelativePathKey = (value: string) => path.normalize(value || '').toLowerCase()
+
+const expandP4SyncPath = (syncPath: string, shouldExpand: boolean, excludedNames: Set<string>) => {
   const normalizedPath = path.normalize(syncPath)
-  // Content 目录文件量大且容易触发外层目录锁问题，按一层子目录拆开独立同步。
-  if (path.basename(normalizedPath).toLowerCase() === 'content' && fs.existsSync(normalizedPath)) {
-    return listSafeP4ChildDirs(normalizedPath)
+  // 只有 INI 中显式列入 +ExpandChildren 的目录才会按下一层子目录展开。
+  if (shouldExpand) {
+    return listSafeP4ChildDirs(normalizedPath, excludedNames)
   }
   return [normalizedPath]
 }
 
-const normalizeP4SyncPaths = (projectDir: string, projectRoot: string, requestedPaths?: string[]) => {
-  const explicitPaths = (requestedPaths || [])
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-    .map((item) => path.isAbsolute(item) ? item : path.join(projectRoot || '', item))
+export const resolveP4SyncPathsFromIniText = (iniText: string, projectRoot: string) => {
+  const config = parseP4SafePathsIni(iniText)
+  const excludedNames = new Set(config.excludeChildDirs.map((item) => item.toLowerCase()))
+  const resolvedPaths = config.roots.flatMap((rootConfig) => {
+    const rootDir = path.join(projectRoot, rootConfig.base)
+    const expandSet = new Set(rootConfig.expandChildren.map(normalizeRelativePathKey))
+    return rootConfig.paths.flatMap((relativePath) => {
+      const shouldExpand = expandSet.has(normalizeRelativePathKey(relativePath))
+      return expandP4SyncPath(path.join(rootDir, relativePath), shouldExpand, excludedNames)
+    })
+  })
+  return [...new Set(resolvedPaths.map((item) => path.normalize(item)))]
+}
 
-  if (explicitPaths.length > 0) {
-    return [...new Set(explicitPaths.flatMap(expandP4SyncPath))]
-  }
-
-  if (!fs.existsSync(projectDir)) {
+const readConfiguredP4SyncPaths = (projectRoot: string) => {
+  if (!fs.existsSync(UPDATE_CODE_ASSETS_PATHS_INI)) {
     return []
   }
-
-  // P4 不能直接同步 Survive 外层目录；默认拆成一层子目录，并对 Content 再拆一层。
-  return [...new Set(listSafeP4ChildDirs(projectDir).flatMap(expandP4SyncPath))]
+  return resolveP4SyncPathsFromIniText(fs.readFileSync(UPDATE_CODE_ASSETS_PATHS_INI, 'utf-8'), projectRoot)
 }
 
 const buildVersionUpdateArgs = (
@@ -133,7 +207,7 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   const versionInfo = parseBuildVersionUpdateText(payload.versionUpdateText || '')
   const hasAssetVersions = !!(versionInfo.mergedP4Head || versionInfo.p4Merge.length)
   const hasSvnVersions = !!(versionInfo.mergedSvnHead || versionInfo.svnMerge.length)
-  const p4SyncPaths = normalizeP4SyncPaths(projectDir, projectRoot, payload.p4SyncPaths)
+  const p4SyncPaths = readConfiguredP4SyncPaths(projectRoot)
   const steps: CommandStep[] = []
 
   addValidation(errors, process.platform === 'win32', 'Only Windows is supported for this flow.')
@@ -141,9 +215,10 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   addValidation(errors, fs.existsSync(projectDir), `SVN update path not found: ${projectDir}`)
   addValidation(errors, hasAssetVersions || hasSvnVersions, 'Version update text did not contain MergedP4Head/MergedSvnHead/P4Merge/SVNMerge.')
   addValidation(errors, fs.existsSync(UPDATE_CODE_ASSETS_SCRIPT), `Version update script not found: ${UPDATE_CODE_ASSETS_SCRIPT}`)
+  addValidation(errors, fs.existsSync(UPDATE_CODE_ASSETS_PATHS_INI), `P4 safe paths INI not found: ${UPDATE_CODE_ASSETS_PATHS_INI}`)
 
   if (hasAssetVersions) {
-    addValidation(errors, p4SyncPaths.length > 0, 'No safe P4 sync paths found. Configure p4SyncPaths instead of syncing the outer project directory.')
+    addValidation(errors, p4SyncPaths.length > 0, `No safe P4 sync paths found. Configure ${UPDATE_CODE_ASSETS_PATHS_INI}.`)
     for (const p4Path of p4SyncPaths) {
       addValidation(errors, fs.existsSync(p4Path), `P4 sync path not found: ${p4Path}`)
     }

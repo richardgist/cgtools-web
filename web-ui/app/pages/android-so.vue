@@ -76,7 +76,47 @@
         <div class="card-header">Current Step Settings</div>
         <div class="card-body">
           <div v-if="activeTab === 'buildSo'" class="field-grid">
-            <div class="build-reminder-card">
+            <div class="field-row compact">
+              <label>Build Mode</label>
+              <select v-model="settings.buildMode" class="fluent-select">
+                <option value="full">Full Build SO</option>
+                <option value="rebuildOnly">Rebuild SO Only</option>
+              </select>
+            </div>
+            <label v-if="settings.buildMode === 'full'" class="check-line">
+              <input v-model="settings.versionUpdateEnabled" type="checkbox" />
+              Update SVN/P4 to test version before build
+            </label>
+            <div v-if="settings.buildMode === 'full' && settings.versionUpdateEnabled" class="version-update-card">
+              <div class="field-row textarea-row">
+                <label>Version Text</label>
+                <textarea
+                  v-model="settings.versionUpdateText"
+                  class="fluent-input path-input version-textarea"
+                  placeholder="【CG】每日转测试版本（MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969）"
+                ></textarea>
+              </div>
+              <div class="field-row textarea-row">
+                <label>P4 Safe Paths</label>
+                <textarea
+                  v-model="settings.p4SyncPathsText"
+                  class="fluent-input path-input p4-paths-textarea"
+                  placeholder="默认会拆分 Survive 下的一层子目录；也可以每行写一个安全路径，例如 Survive\Source"
+                ></textarea>
+              </div>
+              <label class="check-line">
+                <input v-model="settings.p4Parallel" type="checkbox" />
+                Sync P4 safe paths in parallel
+              </label>
+              <div class="hint-line">
+                Parsed: P4 <code>{{ parsedVersionUpdate.mergedP4Head || '-' }}</code>,
+                SVN <code>{{ parsedVersionUpdate.mergedSvnHead || '-' }}</code>,
+                P4Merge <code>{{ parsedVersionUpdate.p4Merge.join(', ') || '-' }}</code>,
+                SVNMerge <code>{{ parsedVersionUpdate.svnMerge.join(', ') || '-' }}</code>
+              </div>
+              <div class="hint-line warn">P4 will sync child/safe paths only, never the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory directly.</div>
+            </div>
+            <div v-if="settings.buildMode === 'full'" class="build-reminder-card">
               <div class="build-reminder-header">
                 <div>
                   <div class="build-reminder-step">Step 0</div>
@@ -107,13 +147,15 @@
             </div>
             <div class="field-row">
               <label>Build Log Path (optional)</label>
-              <input v-model="settings.logPath" class="fluent-input path-input" :placeholder="defaultBuildLogPath" />
+              <input v-model="settings.logPath" class="fluent-input path-input" :placeholder="activeBuildLogPlaceholder" />
             </div>
             <div class="field-row compact">
               <label>Max Parallel Actions (optional)</label>
               <input v-model.number="settings.maxParallelActions" class="fluent-input" type="number" min="1" max="128" placeholder="8" />
             </div>
             <div class="hint-line">Build uses UnrealBuildTool direct mode (not UAT BuildCookRun).</div>
+            <div v-if="settings.buildMode === 'full'" class="hint-line">Full mode updates ABI config, prepares ReplaceManager, generates manifest, then builds SO.</div>
+            <div v-else class="hint-line warn">Rebuild-only mode skips ABI config, ReplaceManager, and manifest. Use it after a full Build SO has already succeeded.</div>
             <div class="hint-line">Shipping config will auto append <code>-ShippingDev</code>.</div>
             <div class="hint-line">Expected output: <code>{{ expectedSoOutputPath }}</code></div>
           </div>
@@ -306,6 +348,11 @@ const STORAGE_KEY = 'cgtools_android_so_profiles_v2'
 const DEFAULT_PROJECT_ROOT = 'C:\\CJGame\\PRE418'
 const SETTINGS_KEYS = [
   'projectRoot',
+  'buildMode',
+  'versionUpdateEnabled',
+  'versionUpdateText',
+  'p4SyncPathsText',
+  'p4Parallel',
   'config',
   'arch',
   'logPath',
@@ -423,10 +470,21 @@ const buildDefaultLogPath = (projectFile, config, arch, projectRoot) => {
   return `${projectDir}\\Saved\\Logs\\Build\\AndroidSO_${config || 'Development'}_${arch || 'arm64-v8a'}.log`
 }
 
+const buildDefaultRebuildLogPath = (projectFile, config, arch, projectRoot) => {
+  const projectDir = resolveProjectDir(projectFile, projectRoot)
+  if (!projectDir) return ''
+  return `${projectDir}\\Saved\\Logs\\Build\\AndroidSO_Rebuild_${config || 'Development'}_${arch || 'arm64-v8a'}.log`
+}
+
 const createDefaultSettings = (projectRoot = DEFAULT_PROJECT_ROOT) => {
   const sharedPaths = deriveSharedPaths(projectRoot)
   return {
     projectRoot: sharedPaths.projectRoot,
+    buildMode: 'full',
+    versionUpdateEnabled: false,
+    versionUpdateText: '',
+    p4SyncPathsText: '',
+    p4Parallel: true,
     config: 'Development',
     arch: 'arm64-v8a',
     logPath: '',
@@ -489,6 +547,13 @@ const sanitizeSettingsProfile = (profile, fallbackRoot = DEFAULT_PROJECT_ROOT) =
     sanitized.pushUseRunAs = true
     sanitized.pushLaunchAfterPush = true
   }
+  if (!['full', 'rebuildOnly'].includes(sanitized.buildMode)) {
+    sanitized.buildMode = 'full'
+  }
+  sanitized.versionUpdateEnabled = !!sanitized.versionUpdateEnabled
+  sanitized.versionUpdateText = sanitized.versionUpdateText || ''
+  sanitized.p4SyncPathsText = sanitized.p4SyncPathsText || ''
+  sanitized.p4Parallel = sanitized.p4Parallel !== false
 
   sanitized.projectRoot = resolvedProjectRoot
   const sharedPaths = deriveSharedPaths(resolvedProjectRoot)
@@ -581,6 +646,8 @@ const injectToolsReady = computed(() => detected.androidInjectDirExists && detec
 const sharedPaths = computed(() => deriveSharedPaths(settings.projectRoot))
 const defaultEngineIniPath = computed(() => joinWindowsPath(settings.projectRoot, 'Survive', 'Config', 'DefaultEngine.ini'))
 const defaultBuildLogPath = computed(() => buildDefaultLogPath(sharedPaths.value.projectFile, settings.config, settings.arch, settings.projectRoot))
+const defaultRebuildLogPath = computed(() => buildDefaultRebuildLogPath(sharedPaths.value.projectFile, settings.config, settings.arch, settings.projectRoot))
+const activeBuildLogPlaceholder = computed(() => settings.buildMode === 'rebuildOnly' ? defaultRebuildLogPath.value : defaultBuildLogPath.value)
 const defaultSoPath = computed(() => buildDefaultSoPath(sharedPaths.value.projectFile, settings.config, settings.arch, settings.projectRoot))
 
 const quote = (text) => {
@@ -671,6 +738,29 @@ const getDefaultEngineIniAndroidAbiSettings = (arch) => ({
   bBuildForX8664: arch === 'x86_64' ? 'True' : 'False',
 })
 
+const parseBuildVersionUpdateText = (text) => {
+  const normalized = String(text || '').replace(/[，,]/g, ' ')
+  const numberOf = (label) => normalized.match(new RegExp(`${label}\\s*[:：]\\s*(\\d+)`, 'i'))?.[1] || ''
+  const listOf = (label) => (normalized.match(new RegExp(`${label}\\s*[:：]\\s*([\\d\\s\\-－–—]+)`, 'i'))?.[1] || '')
+    .split(/[\s\-－–—]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  return {
+    mergedP4Head: numberOf('MergedP4Head'),
+    mergedSvnHead: numberOf('MergedSvnHead'),
+    p4Merge: listOf('P4Merge'),
+    svnMerge: listOf('SVNMerge'),
+  }
+}
+
+const parseP4SyncPathsText = (text) => String(text || '')
+  .split(/\r?\n|;/)
+  .map((item) => item.trim())
+  .filter(Boolean)
+
+const parsedVersionUpdate = computed(() => parseBuildVersionUpdateText(settings.versionUpdateText))
+
 const selectedIniSnippet = computed(() => {
   const entries = getDefaultEngineIniAndroidAbiSettings(settings.arch)
   return [
@@ -679,34 +769,117 @@ const selectedIniSnippet = computed(() => {
   ].join('\n')
 })
 
+const buildVersionUpdatePreviewSteps = () => {
+  if (!settings.versionUpdateEnabled) return []
+
+  const parsed = parsedVersionUpdate.value
+  const projectDir = sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, '')
+  const configuredP4Paths = parseP4SyncPathsText(settings.p4SyncPathsText)
+  const p4PathLabel = configuredP4Paths.length
+    ? configuredP4Paths.join('; ')
+    : `${projectDir}\\<child-dirs except .svn/.git/Saved/Intermediate/Binaries>`
+  const steps = []
+
+  if (parsed.mergedSvnHead || parsed.svnMerge.length) {
+    steps.push(createPreviewStep(
+      'Update SVN to test version',
+      [
+        `svn update -r ${parsed.mergedSvnHead || '<MergedSvnHead>'} ${quote(projectDir)} --non-interactive`,
+        ...parsed.svnMerge.map((revision) => `svn merge -c ${revision} <svn-url> ${quote(projectDir)} --non-interactive --accept postpone`),
+      ].join('\n'),
+      projectDir,
+    ))
+  }
+
+  if (parsed.mergedP4Head || parsed.p4Merge.length) {
+    steps.push(createPreviewStep(
+      'Sync P4 to test version',
+      [
+        `safe paths: ${p4PathLabel}`,
+        parsed.mergedP4Head ? `p4 sync <safe-path>\\...@${parsed.mergedP4Head}` : '',
+        ...parsed.p4Merge.map((change) => `p4 sync <safe-path>\\...@=${change}`),
+        settings.p4Parallel ? 'parallel: enabled for multiple safe paths' : 'parallel: disabled',
+      ].filter(Boolean).join('\n'),
+      settings.projectRoot,
+    ))
+  }
+
+  return steps
+}
+
+const buildBuildPreviewSteps = () => {
+  const projectFile = sharedPaths.value.projectFile
+  const engineRoot = sharedPaths.value.engineRoot
+  const ubtExe = `${engineRoot}\\Binaries\\DotNET\\UnrealBuildTool.exe`
+  const targetName = projectFile ? projectFile.replace(/^.*[\\/]/, '').replace(/\.uproject$/i, '') : 'ShadowTrackerExtra'
+  const projectDir = projectFile ? projectFile.replace(/[\\/][^\\/]+$/, '') : settings.projectRoot
+  const shippingDevArg = settings.config === 'Shipping' ? ' -ShippingDev' : ''
+  const archArg = archToUbtArg(settings.arch)
+  const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultBuildLogPath.value
+  const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
+  const replaceManagerDir = 'I:\\cgtools\\ReplaceManager\\RevertTool'
+  const replaceManagerSourceDir = 'I:\\cgtools\\ReplaceManager'
+  const replaceManagerTool = `${replaceManagerDir}\\ReplaceManagerTool.py`
+  const baseCommand = `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} ${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge`
+  const replaceCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} restore`
+  const iniCommand = `cgtools:update-default-engine-ini -Path=${quote(defaultEngineIniPath.value)} ${Object.entries(getDefaultEngineIniAndroidAbiSettings(settings.arch)).map(([key, value]) => `-${key}=${value}`).join(' ')}`
+  const manifestCommand = `${baseCommand} -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
+  const buildCommand = `${baseCommand}${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
+  const cleanCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} clean`
+
+  return [
+    ...buildVersionUpdatePreviewSteps(),
+    createPreviewStep('Update DefaultEngine.ini Android ABI', iniCommand, projectDir),
+    createPreviewStep('Prepare ReplaceManager patch', replaceCommand, replaceManagerDir),
+    createPreviewStep('Generate UBT manifest', manifestCommand, settings.projectRoot),
+    createPreviewStep('Build Android SO with UBT', buildCommand, settings.projectRoot),
+    createPreviewStep('Restore ReplaceManager state', cleanCommand, replaceManagerDir),
+  ]
+}
+
+const buildRebuildPreviewSteps = () => {
+  const projectFile = sharedPaths.value.projectFile
+  const engineRoot = sharedPaths.value.engineRoot
+  const ubtExe = `${engineRoot}\\Binaries\\DotNET\\UnrealBuildTool.exe`
+  const targetName = projectFile ? projectFile.replace(/^.*[\\/]/, '').replace(/\.uproject$/i, '') : 'ShadowTrackerExtra'
+  const projectDir = projectFile ? projectFile.replace(/[\\/][^\\/]+$/, '') : settings.projectRoot
+  const shippingDevArg = settings.config === 'Shipping' ? ' -ShippingDev' : ''
+  const archArg = archToUbtArg(settings.arch)
+  const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultRebuildLogPath.value
+  const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
+  const buildCommand = `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} ${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
+
+  return [
+    createPreviewStep('Rebuild Android SO with UBT', buildCommand, settings.projectRoot),
+  ]
+}
+
+const buildPushPreviewSteps = (soPath) => {
+  const remotePath = settings.pushRemotePath?.trim() || '/data/local/tmp/'
+  const normalized = remotePath.replace(/\\/g, '/')
+  const remoteFile = normalized.endsWith('/')
+    ? `${normalized}libUE4.so`
+    : (normalized.toLowerCase().endsWith('.so') ? `${normalized.replace(/\/[^/]*$/, '')}/libUE4.so` : `${normalized}/libUE4.so`)
+  if (settings.pushUseRunAs) {
+    const packageName = settings.pushPackageName?.trim() || 'com.tencent.tmgp.pubgmhd'
+    return [
+      createPreviewStep('Push target libUE4.so to temp path', `adb push ${quote(soPath)} /data/local/tmp/libUE4.so`),
+      createPreviewStep('Ensure app_lib exists', `adb shell run-as ${packageName} mkdir -p app_lib`),
+      createPreviewStep('Copy SO into app_lib', `adb shell run-as ${packageName} cp /data/local/tmp/libUE4.so app_lib/libUE4.so`),
+      createPreviewStep('Verify libUE4.so in app_lib', `adb shell run-as ${packageName} ls -l app_lib/libUE4.so`),
+      ...(settings.pushLaunchAfterPush ? [
+        createPreviewStep('Launch package after SO push', `adb shell monkey -p ${packageName} -c android.intent.category.LAUNCHER 1`),
+      ] : []),
+    ]
+  }
+  return [
+    createPreviewStep('Push SO via adb', `adb push ${quote(soPath)} ${quote(remoteFile)}`),
+  ]
+}
+
 const commandPreviewSteps = computed(() => {
   if (activeTab.value === 'buildSo') {
-    const projectFile = sharedPaths.value.projectFile
-    const engineRoot = sharedPaths.value.engineRoot
-    const ubtExe = `${engineRoot}\\Binaries\\DotNET\\UnrealBuildTool.exe`
-    const targetName = projectFile ? projectFile.replace(/^.*[\\/]/, '').replace(/\.uproject$/i, '') : 'ShadowTrackerExtra'
-    const projectDir = projectFile ? projectFile.replace(/[\\/][^\\/]+$/, '') : settings.projectRoot
-    const shippingDevArg = settings.config === 'Shipping' ? ' -ShippingDev' : ''
-    const archArg = archToUbtArg(settings.arch)
-    const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultBuildLogPath.value
-    const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
-    const replaceManagerDir = 'I:\\cgtools\\ReplaceManager\\RevertTool'
-    const replaceManagerSourceDir = 'I:\\cgtools\\ReplaceManager'
-    const replaceManagerTool = `${replaceManagerDir}\\ReplaceManagerTool.py`
-    const baseCommand = `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} ${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge`
-    const replaceCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} restore`
-    const iniCommand = `cgtools:update-default-engine-ini -Path=${quote(defaultEngineIniPath.value)} ${Object.entries(getDefaultEngineIniAndroidAbiSettings(settings.arch)).map(([key, value]) => `-${key}=${value}`).join(' ')}`
-    const manifestCommand = `${baseCommand} -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
-    const buildCommand = `${baseCommand}${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
-    const cleanCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} clean`
-
-    return [
-      createPreviewStep('Update DefaultEngine.ini Android ABI', iniCommand, projectDir),
-      createPreviewStep('Prepare ReplaceManager patch', replaceCommand, replaceManagerDir),
-      createPreviewStep('Generate UBT manifest', manifestCommand, settings.projectRoot),
-      createPreviewStep('Build Android SO with UBT', buildCommand, settings.projectRoot),
-      createPreviewStep('Restore ReplaceManager state', cleanCommand, replaceManagerDir),
-    ]
+    return settings.buildMode === 'rebuildOnly' ? buildRebuildPreviewSteps() : buildBuildPreviewSteps()
   }
   if (activeTab.value === 'replaceA') {
     return [
@@ -736,26 +909,7 @@ const commandPreviewSteps = computed(() => {
     ]
   }
   if (activeTab.value === 'pushSo') {
-    const remotePath = settings.pushRemotePath?.trim() || '/data/local/tmp/'
-    const normalized = remotePath.replace(/\\/g, '/')
-    const remoteFile = normalized.endsWith('/')
-      ? `${normalized}libUE4.so`
-      : (normalized.toLowerCase().endsWith('.so') ? `${normalized.replace(/\/[^/]*$/, '')}/libUE4.so` : `${normalized}/libUE4.so`)
-    if (settings.pushUseRunAs) {
-      const packageName = settings.pushPackageName?.trim() || 'com.tencent.tmgp.pubgmhd'
-      return [
-        createPreviewStep('Push target libUE4.so to temp path', `adb push ${quote(settings.soPath)} /data/local/tmp/libUE4.so`),
-        createPreviewStep('Ensure app_lib exists', `adb shell run-as ${packageName} mkdir -p app_lib`),
-        createPreviewStep('Copy SO into app_lib', `adb shell run-as ${packageName} cp /data/local/tmp/libUE4.so app_lib/libUE4.so`),
-        createPreviewStep('Verify libUE4.so in app_lib', `adb shell run-as ${packageName} ls -l app_lib/libUE4.so`),
-        ...(settings.pushLaunchAfterPush ? [
-          createPreviewStep('Launch package after SO push', `adb shell monkey -p ${packageName} -c android.intent.category.LAUNCHER 1`),
-        ] : []),
-      ]
-    }
-    return [
-      createPreviewStep('Push SO via adb', `adb push ${quote(settings.soPath)} ${quote(remoteFile)}`),
-    ]
+    return buildPushPreviewSteps(settings.soPath)
   }
   return [
     createPreviewStep('APL snippet', aplSnippet.value),
@@ -1009,6 +1163,11 @@ const buildPayload = () => {
       arch: settings.arch,
       logPath: settings.logPath?.trim() || undefined,
       maxParallelActions: Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? settings.maxParallelActions : undefined,
+      versionUpdateEnabled: settings.buildMode === 'full' && !!settings.versionUpdateEnabled,
+      versionUpdateText: settings.versionUpdateText,
+      svnUpdatePath: sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, ''),
+      p4SyncPaths: parseP4SyncPathsText(settings.p4SyncPathsText),
+      p4Parallel: settings.p4Parallel !== false,
     }
   }
   if (activeTab.value === 'replaceA') {
@@ -1044,7 +1203,7 @@ const runActive = async () => {
   try {
     const socket = await ensureSocket()
     const payload = buildPayload()
-    const jobType = activeTab.value
+    const jobType = activeTab.value === 'buildSo' && settings.buildMode === 'rebuildOnly' ? 'rebuildSo' : activeTab.value
     runLogDir.value = ''
     resetWorkflowState()
     appendLog('info', `[run] ${jobType}\n`)
@@ -1151,6 +1310,10 @@ onMounted(async () => {
   grid-template-columns: 210px 220px;
 }
 
+.field-row.textarea-row {
+  align-items: start;
+}
+
 .field-row label {
   color: var(--text-secondary);
   font-size: 13px;
@@ -1167,6 +1330,26 @@ onMounted(async () => {
 
 .hint-line.warn {
   color: #ffca7a;
+}
+
+.version-update-card {
+  border: 1px solid rgba(96, 205, 255, 0.32);
+  border-radius: 8px;
+  background: rgba(96, 205, 255, 0.06);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.version-textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.p4-paths-textarea {
+  min-height: 58px;
+  resize: vertical;
 }
 
 .build-reminder-card {

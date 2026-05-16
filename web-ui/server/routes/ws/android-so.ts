@@ -87,6 +87,10 @@ const appendStepLog = (target: StepLogTarget | null | undefined, text: string) =
   fs.appendFileSync(target.path, text, 'utf-8')
 }
 
+const resolveBuiltSoPath = (candidates: Array<string | undefined>) => {
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || ''
+}
+
 const runProcessForExit = async (command: string, args: string[]) => {
   return await new Promise<{ code: number, stdout: string, stderr: string }>((resolve) => {
     const proc = spawn(command, args, {
@@ -170,7 +174,7 @@ const terminateActiveProcessTree = async (peer: Peer | null, runState: ActiveRun
     }
   }
 
-  if (runState.jobType === 'buildSo') {
+  if (runState.jobType === 'buildSo' || runState.jobType === 'rebuildSo') {
     await killBuildProcessesStartedAfter(peer, runState.startedAtMs)
   }
 
@@ -332,6 +336,7 @@ export default defineWebSocketHandler({
       }
 
       let exitCode = 0
+      let builtSoPath = ''
       try {
         for (const [index, step] of plan.steps.entries()) {
           if (runState.terminating) {
@@ -353,6 +358,14 @@ export default defineWebSocketHandler({
             exitCode = result.code
             break
           }
+
+          if ((jobType === 'buildSo' || jobType === 'rebuildSo') && (step.name === 'Build Android SO with UBT' || step.name === 'Rebuild Android SO with UBT')) {
+            builtSoPath = resolveBuiltSoPath(plan.outputSoCandidates || [])
+            if (builtSoPath) {
+              plan.outputs.soPath = builtSoPath
+              send(typedPeer, { type: 'stdout', data: `[info] Resolved built SO: ${builtSoPath}\n` })
+            }
+          }
         }
       } finally {
         for (const [cleanupIndex, cleanupStep] of (plan.cleanupSteps || []).entries()) {
@@ -372,11 +385,11 @@ export default defineWebSocketHandler({
         }
       }
 
-      if (exitCode === 0 && jobType === 'buildSo') {
+      if (exitCode === 0 && (jobType === 'buildSo' || jobType === 'rebuildSo')) {
         const soCandidates = (plan.outputSoCandidates && plan.outputSoCandidates.length > 0)
           ? plan.outputSoCandidates
           : [plan.outputs.soPath]
-        const soPath = soCandidates.find((candidate) => candidate && fs.existsSync(candidate))
+        const soPath = builtSoPath || resolveBuiltSoPath(soCandidates)
         if (!soPath || !fs.existsSync(soPath)) {
           send(typedPeer, {
             type: 'error',

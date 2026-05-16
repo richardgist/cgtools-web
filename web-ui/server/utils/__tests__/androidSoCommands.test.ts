@@ -3,7 +3,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  buildAndroidSoJobPlan,
   formatDefaultEngineIniSnippet,
+  parseBuildVersionUpdateText,
   updateDefaultEngineIniAndroidAbi,
 } from '../androidSoCommands'
 
@@ -66,6 +68,48 @@ try {
       'bBuildForX8664=False',
     ].join('\n'),
   )
+
+  const versionInfo = parseBuildVersionUpdateText('【CG】每日转测试版本  （MergedP4Head：5996891，MergedSvnHead：1466919  ，P4Merge：5996991-5997884，SVNMerge：1466941-1466969-1467034-1467057-1467136-1467216-1467223）')
+  assert.equal(versionInfo.mergedP4Head, '5996891')
+  assert.equal(versionInfo.mergedSvnHead, '1466919')
+  assert.deepEqual(versionInfo.p4Merge, ['5996991', '5997884'])
+  assert.deepEqual(versionInfo.svnMerge, ['1466941', '1466969', '1467034', '1467057', '1467136', '1467216', '1467223'])
+
+  const projectDir = path.join(tempRoot, 'Survive')
+  fs.mkdirSync(path.join(projectDir, 'Source'), { recursive: true })
+  fs.writeFileSync(path.join(projectDir, 'ShadowTrackerExtra.uproject'), '{}', 'utf-8')
+  fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Engine'), { recursive: true })
+  const fullBuildPlan = buildAndroidSoJobPlan('buildSo', {
+    projectRoot: tempRoot,
+    projectFile: path.join(projectDir, 'ShadowTrackerExtra.uproject'),
+    engineRoot: path.join(tempRoot, 'UE4181', 'Engine'),
+    defaultEngineIniPath: iniPath,
+    config: 'Development',
+    arch: 'arm64-v8a',
+    versionUpdateEnabled: true,
+    versionUpdateText: 'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
+    p4SyncPaths: [path.join(projectDir, 'Source')],
+    p4Parallel: true,
+  })
+
+  assert.deepEqual(fullBuildPlan.steps.slice(0, 2).map((step) => step.name), ['Update SVN to test version', 'Sync P4 to test version'])
+  assert(fullBuildPlan.preview.includes('svn update -r 1466919'))
+  assert(fullBuildPlan.preview.includes('@5996891'))
+  assert(fullBuildPlan.preview.includes('5996991'))
+
+  const rebuildPlan = buildAndroidSoJobPlan('rebuildSo', {
+    projectRoot: tempRoot,
+    projectFile: path.join(tempRoot, 'Survive', 'ShadowTrackerExtra.uproject'),
+    engineRoot: path.join(tempRoot, 'UE4181', 'Engine'),
+    defaultEngineIniPath: iniPath,
+    config: 'Development',
+    arch: 'arm64-v8a',
+  })
+
+  assert.deepEqual(rebuildPlan.steps.map((step) => step.name), ['Rebuild Android SO with UBT'])
+  assert.equal(rebuildPlan.cleanupSteps?.length || 0, 0)
+  assert(!rebuildPlan.preview.includes('ReplaceManagerTool.py'))
+  assert(!rebuildPlan.preview.includes('-generatemanifest'))
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true })
 }

@@ -202,6 +202,7 @@ try {
     '--dry-run',
   ], { cwd: tempRoot, encoding: 'utf-8' })
   assert.equal(p4DryRunResult.status, 0)
+  assert(p4DryRunResult.stdout.includes('[dry-run] p4 revert'))
   assert(p4DryRunResult.stdout.includes('[dry-run] p4 sync'))
   assert(p4DryRunResult.stdout.includes('@5996891'))
   assert(p4DryRunResult.stdout.includes('@=5996991'))

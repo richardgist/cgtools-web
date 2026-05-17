@@ -82,6 +82,10 @@ def p4_specs(paths: Iterable[str], revision: str, exact_change: bool = False) ->
     return [f"{path}{suffix}" for path in paths]
 
 
+def p4_revert_specs(paths: Iterable[str]) -> List[str]:
+    return [f"{path}\\..." for path in paths]
+
+
 def sync_p4_many(specs: Iterable[str], label: str, parallel: bool, dry_run: bool) -> None:
     sync_specs = list(specs)
     if not sync_specs:
@@ -110,6 +114,8 @@ def update_p4(version_info: dict, p4_paths: List[str], parallel: bool, dry_run: 
         return 1
 
     try:
+        for spec in p4_revert_specs(p4_paths):
+            run_checked(["p4", "revert", spec], dry_run)
         if merged_p4_head:
             sync_p4_many(p4_specs(p4_paths, merged_p4_head), f"base @{merged_p4_head}", parallel, dry_run)
         for revision in p4_merge:

@@ -621,6 +621,7 @@ const buildDeleteSoPlan = (payload: DeleteSoPayload): JobPlan => {
   const errors: string[] = []
   const warnings: string[] = []
   const packageName = (payload.packageName || '').trim()
+  const verifyDeletedCmd = `run-as ${packageName} sh -c 'if [ -e app_lib/libUE4.so ]; then echo still exists: app_lib/libUE4.so; exit 1; fi; echo deleted: app_lib/libUE4.so'`
   const steps: CommandStep[] = [
     {
       name: 'Delete libUE4.so from app_lib',
@@ -630,7 +631,7 @@ const buildDeleteSoPlan = (payload: DeleteSoPayload): JobPlan => {
     {
       name: 'Verify app_lib libUE4.so deleted',
       cmd: 'adb',
-      args: ['shell', 'run-as', packageName, 'sh', '-c', 'test ! -e app_lib/libUE4.so && echo deleted: app_lib/libUE4.so'],
+      args: ['shell', verifyDeletedCmd],
     },
   ]
 

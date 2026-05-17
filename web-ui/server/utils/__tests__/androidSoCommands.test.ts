@@ -277,6 +277,7 @@ try {
     'Delete temp libUE4.so',
   ])
   assert(deletePlan.preview.includes('run-as com.tencent.tmgp.pubgmhd rm -f app_lib/libUE4.so'))
+  assert(deletePlan.preview.includes("run-as com.tencent.tmgp.pubgmhd sh -c 'if [ -e app_lib/libUE4.so ]; then echo still exists: app_lib/libUE4.so; exit 1; fi; echo deleted: app_lib/libUE4.so'"))
   assert(deletePlan.preview.includes('/data/local/tmp/libUE4.so'))
   assert.equal(deletePlan.outputs.deletedSoPath, 'app_lib/libUE4.so')
 

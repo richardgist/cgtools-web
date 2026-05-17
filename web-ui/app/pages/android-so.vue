@@ -887,7 +887,7 @@ const buildDeletePreviewSteps = () => {
     createPreviewStep('Delete libUE4.so from app_lib', `adb shell run-as ${packageName} rm -f app_lib/libUE4.so`),
     createPreviewStep(
       'Verify app_lib libUE4.so deleted',
-      `adb shell run-as ${packageName} sh -c "test ! -e app_lib/libUE4.so && echo deleted: app_lib/libUE4.so"`,
+      `adb shell "run-as ${packageName} sh -c 'if [ -e app_lib/libUE4.so ]; then echo still exists: app_lib/libUE4.so; exit 1; fi; echo deleted: app_lib/libUE4.so'"`,
     ),
     ...(settings.deleteTempSo !== false ? [
       createPreviewStep('Delete temp libUE4.so', 'adb shell rm -f /data/local/tmp/libUE4.so'),

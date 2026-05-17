@@ -121,11 +121,10 @@ def update_p4(version_info: dict, p4_paths: List[str], parallel: bool, dry_run: 
 
 
 def resolve_svn_source_url(svn_path: str, dry_run: bool) -> str:
-    if dry_run:
-        return svn_path
-
     completed = run_command(["svn", "info", "--show-item", "url", svn_path], False, capture_stdout=True)
     if completed.returncode != 0:
+        if dry_run:
+            return svn_path
         stderr = (completed.stderr or "").strip()
         raise RuntimeError(f"failed to resolve SVN URL from working copy: {stderr}")
     url = (completed.stdout or "").strip()
@@ -142,25 +141,32 @@ def svn_revision_touches_url(source_url: str, revision: str) -> bool:
     return re.search(rf"^r{re.escape(revision)}\s+\|", completed.stdout or "", flags=re.MULTILINE) is not None
 
 
-def update_svn(version_info: dict, svn_path: str, dry_run: bool) -> int:
+def update_svn(version_info: dict, svn_paths: List[str], dry_run: bool) -> int:
     merged_svn_head = version_info["merged_svn_head"]
     svn_merge = version_info["svn_merge"]
     if not merged_svn_head and not svn_merge:
         print("[version] No SVN revisions found; skipping.", flush=True)
         return 0
-    if not svn_path:
+    if not svn_paths:
         print("[version] No SVN update path was provided.", file=sys.stderr, flush=True)
         return 1
 
     try:
-        if merged_svn_head:
-            run_checked(["svn", "update", "-r", merged_svn_head, svn_path, "--non-interactive"], dry_run)
-        svn_source_url = resolve_svn_source_url(svn_path, dry_run) if svn_merge else ""
+        for svn_path in svn_paths:
+            if merged_svn_head:
+                run_checked(["svn", "update", "-r", merged_svn_head, svn_path, "--non-interactive"], dry_run)
+
+        svn_sources = [(svn_path, resolve_svn_source_url(svn_path, dry_run)) for svn_path in svn_paths] if svn_merge else []
         for revision in svn_merge:
-            if not dry_run and not svn_revision_touches_url(svn_source_url, revision):
-                print(f"[version] SVN merge r{revision} skipped: no changes under {svn_source_url}", flush=True)
-                continue
-            run_checked(["svn", "merge", "-c", revision, svn_source_url, svn_path, "--non-interactive"], dry_run)
+            merged_any = False
+            for svn_path, svn_source_url in svn_sources:
+                can_inspect_revision = not dry_run or svn_source_url != svn_path
+                if can_inspect_revision and not svn_revision_touches_url(svn_source_url, revision):
+                    continue
+                run_checked(["svn", "merge", "-c", revision, svn_source_url, svn_path, "--non-interactive"], dry_run)
+                merged_any = True
+            if not merged_any:
+                print(f"[version] SVN merge r{revision} skipped: no changes under configured SVN paths", flush=True)
     except Exception as exc:
         print(f"[version] {exc}", file=sys.stderr, flush=True)
         return 1
@@ -172,6 +178,7 @@ def main() -> int:
     parser.add_argument("--step", choices=["p4", "svn"], required=True)
     parser.add_argument("--version-text", default="")
     parser.add_argument("--svn-update-path", default="")
+    parser.add_argument("--svn-update-paths-json", default="")
     parser.add_argument("--p4-sync-paths-json", default="[]")
     parser.add_argument("--parallel", choices=["true", "false"], default="true")
     parser.add_argument("--dry-run", action="store_true")
@@ -180,13 +187,14 @@ def main() -> int:
     try:
         version_info = parse_version_text(args.version_text)
         p4_paths = parse_json_list(args.p4_sync_paths_json)
+        svn_paths = parse_json_list(args.svn_update_paths_json) or ([args.svn_update_path] if args.svn_update_path else [])
     except ValueError as exc:
         print(f"[version] {exc}", file=sys.stderr, flush=True)
         return 1
 
     if args.step == "p4":
         return update_p4(version_info, p4_paths, args.parallel == "true", args.dry_run)
-    return update_svn(version_info, args.svn_update_path, args.dry_run)
+    return update_svn(version_info, svn_paths, args.dry_run)
 
 
 if __name__ == "__main__":

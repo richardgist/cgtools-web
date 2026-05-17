@@ -783,8 +783,9 @@ const buildVersionUpdatePreviewSteps = () => {
     createPreviewStep(
       'Update SVN',
       [
-        parsed.mergedSvnHead ? `svn update -r ${parsed.mergedSvnHead} ${quote(projectDir)} --non-interactive` : 'svn base: <MergedSvnHead missing, skip update>',
-        ...(parsed.svnMerge.length ? parsed.svnMerge.map((revision) => `svn merge -c ${revision} <svn-url> ${quote(projectDir)} --non-interactive --accept postpone`) : ['svn merges: <SVNMerge missing, skip merges>']),
+        `update paths: ${SAFE_PATHS_INI_PATH} ([SVN] +UpdatePath)`,
+        parsed.mergedSvnHead ? `svn update -r ${parsed.mergedSvnHead} <svn-update-path> --non-interactive` : 'svn base: <MergedSvnHead missing, skip update>',
+        ...(parsed.svnMerge.length ? parsed.svnMerge.map((revision) => `svn merge -c ${revision} <matched-svn-url> <matched-svn-update-path> --non-interactive`) : ['svn merges: <SVNMerge missing, skip merges>']),
         settings.versionUpdateDryRun ? 'dry-run: enabled, commands will only be printed' : 'dry-run: disabled',
       ].join('\n'),
       projectDir,

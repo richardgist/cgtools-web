@@ -100,6 +100,7 @@ interface P4SafePathsIniConfig {
   roots: P4SafePathsRootConfig[]
   excludeChildDirs: string[]
   p4ClientMappings: P4ClientRootMatch[]
+  svnUpdatePaths: string[]
 }
 
 type RawIniSection = Record<string, string | string[]>
@@ -166,6 +167,7 @@ const parseP4SafePathsIni = (text: string): P4SafePathsIniConfig => {
     p4ClientMappings: asIniArray(rawIni.P4Client?.Mapping)
       .map(parseP4ClientMapping)
       .filter((mapping): mapping is P4ClientRootMatch => !!mapping),
+    svnUpdatePaths: asIniArray(rawIni.SVN?.UpdatePath),
   }
 }
 
@@ -214,6 +216,14 @@ export const resolveP4SyncPathsFromIniText = (iniText: string, projectRoot: stri
   return [...new Set(resolvedPaths.map((item) => path.normalize(item)))]
 }
 
+export const resolveSvnUpdatePathsFromIniText = (iniText: string, projectRoot: string, fallbackPath: string) => {
+  const config = parseP4SafePathsIni(iniText)
+  const configuredPaths = config.svnUpdatePaths.length > 0 ? config.svnUpdatePaths : [fallbackPath]
+  return [...new Set(configuredPaths
+    .map((item) => path.isAbsolute(item) ? item : path.join(projectRoot, item))
+    .map((item) => path.normalize(item)))]
+}
+
 const readConfiguredP4SyncPaths = (projectRoot: string) => {
   if (!fs.existsSync(UPDATE_CODE_ASSETS_PATHS_INI)) {
     return []
@@ -228,14 +238,22 @@ const readConfiguredP4Client = (projectRoot: string) => {
   return resolveP4ClientFromIniText(fs.readFileSync(UPDATE_CODE_ASSETS_PATHS_INI, 'utf-8'), projectRoot)
 }
 
+const readConfiguredSvnUpdatePaths = (projectRoot: string, fallbackPath: string) => {
+  if (!fs.existsSync(UPDATE_CODE_ASSETS_PATHS_INI)) {
+    return [fallbackPath]
+  }
+  return resolveSvnUpdatePathsFromIniText(fs.readFileSync(UPDATE_CODE_ASSETS_PATHS_INI, 'utf-8'), projectRoot, fallbackPath)
+}
+
 const buildVersionUpdateArgs = (
   step: 'p4' | 'svn',
   versionUpdateText: string,
-  svnUpdatePath: string,
+  svnUpdatePaths: string[],
   p4SyncPaths: string[],
   useParallel: boolean,
   dryRun: boolean,
 ) => {
+  const primarySvnPath = svnUpdatePaths[0] || ''
   const args = [
     UPDATE_CODE_ASSETS_SCRIPT,
     '--step',
@@ -243,7 +261,9 @@ const buildVersionUpdateArgs = (
     '--version-text',
     versionUpdateText,
     '--svn-update-path',
-    svnUpdatePath,
+    primarySvnPath,
+    '--svn-update-paths-json',
+    JSON.stringify(svnUpdatePaths),
     '--p4-sync-paths-json',
     JSON.stringify(p4SyncPaths),
     '--parallel',
@@ -260,6 +280,7 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   const warnings: string[] = []
   const projectRoot = payload.projectRoot || ''
   const projectDir = (payload.svnUpdatePath || '').trim() || path.join(projectRoot, 'Survive')
+  const svnUpdatePaths = readConfiguredSvnUpdatePaths(projectRoot, projectDir)
   const versionInfo = parseBuildVersionUpdateText(payload.versionUpdateText || '')
   const hasAssetVersions = !!(versionInfo.mergedP4Head || versionInfo.p4Merge.length)
   const hasSvnVersions = !!(versionInfo.mergedSvnHead || versionInfo.svnMerge.length)
@@ -269,7 +290,9 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
 
   addValidation(errors, process.platform === 'win32', 'Only Windows is supported for this flow.')
   addValidation(errors, fs.existsSync(projectRoot), `projectRoot not found: ${projectRoot}`)
-  addValidation(errors, fs.existsSync(projectDir), `SVN update path not found: ${projectDir}`)
+  for (const svnUpdatePath of svnUpdatePaths) {
+    addValidation(errors, fs.existsSync(svnUpdatePath), `SVN update path not found: ${svnUpdatePath}`)
+  }
   addValidation(errors, hasAssetVersions || hasSvnVersions, 'Version update text did not contain MergedP4Head/MergedSvnHead/P4Merge/SVNMerge.')
   addValidation(errors, fs.existsSync(UPDATE_CODE_ASSETS_SCRIPT), `Version update script not found: ${UPDATE_CODE_ASSETS_SCRIPT}`)
   addValidation(errors, fs.existsSync(UPDATE_CODE_ASSETS_PATHS_INI), `P4 safe paths INI not found: ${UPDATE_CODE_ASSETS_PATHS_INI}`)
@@ -284,7 +307,7 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   steps.push({
     name: 'Update Assets (P4)',
     cmd: 'python',
-    args: buildVersionUpdateArgs('p4', payload.versionUpdateText || '', projectDir, p4SyncPaths, payload.p4Parallel !== false, payload.dryRun === true),
+    args: buildVersionUpdateArgs('p4', payload.versionUpdateText || '', svnUpdatePaths, p4SyncPaths, payload.p4Parallel !== false, payload.dryRun === true),
     cwd: projectRoot,
     env: p4ClientMatch ? { P4CLIENT: p4ClientMatch.client } : undefined,
   })
@@ -292,8 +315,8 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   steps.push({
     name: 'Update SVN',
     cmd: 'python',
-    args: buildVersionUpdateArgs('svn', payload.versionUpdateText || '', projectDir, p4SyncPaths, payload.p4Parallel !== false, payload.dryRun === true),
-    cwd: projectDir,
+    args: buildVersionUpdateArgs('svn', payload.versionUpdateText || '', svnUpdatePaths, p4SyncPaths, payload.p4Parallel !== false, payload.dryRun === true),
+    cwd: svnUpdatePaths[0] || projectDir,
   })
 
   warnings.push(`Parsed version text: P4@${versionInfo.mergedP4Head || '-'}, SVN@${versionInfo.mergedSvnHead || '-'}, P4Merge=${versionInfo.p4Merge.join(',') || '-'}, SVNMerge=${versionInfo.svnMerge.join(',') || '-'}`)
@@ -305,6 +328,9 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
       warnings.push(`P4 client mapping not configured for project root: ${projectRoot}; current P4 environment will be used.`)
     }
     warnings.push(`P4 safe sync paths: ${p4SyncPaths.join('; ')}`)
+  }
+  if (hasSvnVersions) {
+    warnings.push(`SVN update paths: ${svnUpdatePaths.join('; ')}`)
   }
 
   return {

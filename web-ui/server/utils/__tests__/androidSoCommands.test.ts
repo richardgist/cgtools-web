@@ -12,6 +12,7 @@ import {
   parseBuildVersionUpdateText,
   resolveP4ClientFromIniText,
   resolveP4SyncPathsFromIniText,
+  resolveSvnUpdatePathsFromIniText,
 } from '../versionUpdateCommands'
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cgtools-android-so-'))
@@ -134,6 +135,17 @@ try {
   assert(!resolvedIniPaths.includes(path.join(projectDir, 'Content')))
   assert(!resolvedIniPaths.includes(path.join(projectDir, 'Content', '.svn')))
   assert(!resolvedIniPaths.includes(path.join(projectDir, 'Content', 'Saved')))
+
+  const resolvedSvnPaths = resolveSvnUpdatePathsFromIniText([
+    '[SVN]',
+    '+UpdatePath=Survive',
+    '+UpdatePath=UE4181\\Engine\\Source',
+  ].join('\n'), tempRoot, projectDir)
+  assert.deepEqual(resolvedSvnPaths, [
+    path.join(tempRoot, 'Survive'),
+    path.join(tempRoot, 'UE4181', 'Engine', 'Source'),
+  ])
+
   const updatePlan = buildAndroidSoJobPlan('updateCodeAssets', {
     projectRoot: tempRoot,
     versionUpdateText: 'MergedP4Head：5996891，MergedSvnHead：1466919，P4Merge：5996991-5997884，SVNMerge：1466941-1466969',
@@ -150,6 +162,10 @@ try {
   assert(updatePlan.preview.includes('--version-text'))
   assert(updatePlan.preview.includes('--step p4'))
   assert(updatePlan.preview.includes('--step svn'))
+  const svnPathsJson = updatePlan.steps[1]?.args[updatePlan.steps[1]?.args.indexOf('--svn-update-paths-json') + 1] || '[]'
+  const svnPaths = JSON.parse(svnPathsJson)
+  assert(svnPaths.includes(path.join(tempRoot, 'Survive')))
+  assert(svnPaths.includes(path.join(tempRoot, 'UE4181', 'Engine', 'Source')))
   assert(updatePlan.preview.includes('--dry-run'))
   assert(!updatePlan.preview.includes('function Invoke-P4SyncMany'))
   assert(!updatePlan.preview.includes('$svnUrl ='))

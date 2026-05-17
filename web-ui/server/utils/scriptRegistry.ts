@@ -102,6 +102,26 @@ const SCRIPT_PARAMETER_OVERRIDES: Record<string, Record<string, Partial<ScriptPa
         placeholder: '默认保存到 PerformanceData/Saved',
     },
   },
+  'pull_saved_logs.ps1': {
+    packageName: {
+        label: '包名',
+        placeholder: 'Android package name',
+        required: true,
+    },
+    projectName: {
+        label: 'UE 项目名',
+        placeholder: 'UE4Game 下的项目目录名',
+        required: true,
+    },
+    deviceSerial: {
+        label: '设备序列号',
+        placeholder: '多设备时填写 adb serial',
+    },
+    localDir: {
+        label: '保存目录',
+        placeholder: '默认保存到 PerformanceData/Logs',
+    },
+  },
 }
 
 export type ScriptInfo = {

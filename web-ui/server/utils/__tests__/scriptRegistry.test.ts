@@ -7,10 +7,13 @@ const statsPullScriptName = 'pull_latest_stats.ps1'
 const statsPullScriptPath = path.resolve(process.cwd(), '../scripts', statsPullScriptName)
 const savedPullScriptName = 'pull_saved_dir.ps1'
 const savedPullScriptPath = path.resolve(process.cwd(), '../scripts', savedPullScriptName)
+const savedLogsPullScriptName = 'pull_saved_logs.ps1'
+const savedLogsPullScriptPath = path.resolve(process.cwd(), '../scripts', savedLogsPullScriptName)
 
 const scripts = listManagedScripts()
 const statsPullScript = scripts.find((script) => script.name === statsPullScriptName)
 const savedPullScript = scripts.find((script) => script.name === savedPullScriptName)
+const savedLogsPullScript = scripts.find((script) => script.name === savedLogsPullScriptName)
 
 assert(fs.existsSync(statsPullScriptPath), `${statsPullScriptName} should exist in the built-in scripts directory`)
 assert.equal(statsPullScript?.type, 'ps1')
@@ -48,6 +51,27 @@ assert(savedPullScript?.params?.some((param) => (
 const savedPullScriptContent = fs.readFileSync(savedPullScriptPath, 'utf-8')
 assert(savedPullScriptContent.includes("Split-Path -Parent $PSScriptRoot"), 'pull_saved_dir.ps1 should resolve its default output from the repo root')
 assert(savedPullScriptContent.includes("Join-Path $repoRoot 'PerformanceData'"), 'pull_saved_dir.ps1 should use PerformanceData as the default output root')
+
+assert(fs.existsSync(savedLogsPullScriptPath), `${savedLogsPullScriptName} should exist in the built-in scripts directory`)
+assert.equal(savedLogsPullScript?.type, 'ps1')
+assert.equal(savedLogsPullScript?.path, savedLogsPullScriptPath)
+assert.deepEqual(savedLogsPullScript?.params?.map((param) => param.key), [
+  'packageName',
+  'projectName',
+  'deviceSerial',
+  'localDir',
+])
+assert(savedLogsPullScript?.params?.some((param) => (
+  param.key === 'localDir'
+  && param.argName === '-LocalDir'
+  && param.label === '保存目录'
+  && param.placeholder === '默认保存到 PerformanceData/Logs'
+)), 'pull_saved_logs.ps1 should expose a friendly local save directory parameter')
+
+const savedLogsPullScriptContent = fs.readFileSync(savedLogsPullScriptPath, 'utf-8')
+assert(savedLogsPullScriptContent.includes("Split-Path -Parent $PSScriptRoot"), 'pull_saved_logs.ps1 should resolve its default output from the repo root')
+assert(savedLogsPullScriptContent.includes("Join-Path $repoRoot 'PerformanceData'"), 'pull_saved_logs.ps1 should use PerformanceData as the default output root')
+assert(savedLogsPullScriptContent.includes('/Saved/Logs'), 'pull_saved_logs.ps1 should pull the Saved/Logs directory rather than the whole Saved tree')
 
 const logsPullScriptNames = ['pull_game_logs.bat', 'pull_cvar.bat']
 for (const scriptName of logsPullScriptNames) {

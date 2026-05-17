@@ -134,6 +134,14 @@ def resolve_svn_source_url(svn_path: str, dry_run: bool) -> str:
     return url
 
 
+def svn_revision_touches_url(source_url: str, revision: str) -> bool:
+    completed = run_command(["svn", "log", "-q", "-r", revision, source_url], False, capture_stdout=True)
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        raise RuntimeError(f"failed to inspect SVN revision {revision}: {stderr}")
+    return re.search(rf"^r{re.escape(revision)}\s+\|", completed.stdout or "", flags=re.MULTILINE) is not None
+
+
 def update_svn(version_info: dict, svn_path: str, dry_run: bool) -> int:
     merged_svn_head = version_info["merged_svn_head"]
     svn_merge = version_info["svn_merge"]
@@ -149,6 +157,9 @@ def update_svn(version_info: dict, svn_path: str, dry_run: bool) -> int:
             run_checked(["svn", "update", "-r", merged_svn_head, svn_path, "--non-interactive"], dry_run)
         svn_source_url = resolve_svn_source_url(svn_path, dry_run) if svn_merge else ""
         for revision in svn_merge:
+            if not dry_run and not svn_revision_touches_url(svn_source_url, revision):
+                print(f"[version] SVN merge r{revision} skipped: no changes under {svn_source_url}", flush=True)
+                continue
             run_checked(["svn", "merge", "-c", revision, svn_source_url, svn_path, "--non-interactive"], dry_run)
     except Exception as exc:
         print(f"[version] {exc}", file=sys.stderr, flush=True)

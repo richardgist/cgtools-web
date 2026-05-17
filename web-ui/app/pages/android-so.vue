@@ -1199,8 +1199,36 @@ const buildPayload = () => {
   }
 }
 
+const getVersionUpdateSvnWarningPaths = () => [
+  joinWindowsPath(settings.projectRoot, 'Survive'),
+  joinWindowsPath(settings.projectRoot, 'UE4181', 'Engine', 'Source'),
+]
+
+const confirmUpdateCodeAssetsRun = () => {
+  if (activeTab.value !== 'updateCodeAssets' || settings.versionUpdateDryRun === true) {
+    return true
+  }
+
+  const svnPaths = getVersionUpdateSvnWarningPaths()
+    .map((item) => `- ${item}`)
+    .join('\n')
+  return window.confirm([
+    '即将更新代码/资源。',
+    '',
+    '注意：更新前会处理 SVN 工作副本，本地未提交的 SVN 修改可能会被 revert 或被后续 update/merge 覆盖。',
+    '请先检查下面这些 SVN 路径里是否有需要保留的代码：',
+    svnPaths,
+    '',
+    '确认不需要保留本地修改后，再继续执行。',
+  ].join('\n'))
+}
+
 const runActive = async () => {
   if (activeTab.value === 'guideC') {
+    return
+  }
+  if (!confirmUpdateCodeAssetsRun()) {
+    appendLog('info', '[run] canceled before update; user should review SVN local changes first.\n')
     return
   }
   try {

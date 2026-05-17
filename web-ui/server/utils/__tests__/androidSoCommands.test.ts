@@ -10,7 +10,7 @@ import {
 } from '../androidSoCommands'
 import {
   parseBuildVersionUpdateText,
-  resolveP4ClientFromClientsOutput,
+  resolveP4ClientFromIniText,
   resolveP4SyncPathsFromIniText,
 } from '../versionUpdateCommands'
 
@@ -80,13 +80,14 @@ try {
   assert.deepEqual(versionInfo.p4Merge, ['5996991', '5997884'])
   assert.deepEqual(versionInfo.svnMerge, ['1466941', '1466969', '1467034', '1467057', '1467136', '1467216', '1467223'])
 
-  const p4ClientMatch = resolveP4ClientFromClientsOutput([
-    "Client jesephjiang_JESEPHJIAN-PCBU_E_Trunk 2026/05/13 root E:\\ 'Created by jesephjiang. '",
-    "Client jesephjiang_I_Trunk 2026/05/16 root I: 'Created by jesephjiang. '",
-    "Client jesephjiang_I_Nested 2026/05/16 root I:\\CJGame 'Created by jesephjiang. '",
+  const p4ClientMatch = resolveP4ClientFromIniText([
+    '[P4Client]',
+    '+Mapping=E:\\CJGame\\trunk|jesephjiang_JESEPHJIAN-PCBU_E_Trunk',
+    '+Mapping=I:\\|jesephjiang_I_Trunk',
+    '+Mapping=I:\\CJGame|jesephjiang_I_Nested',
   ].join('\n'), 'I:\\CJGame\\trunk')
   assert.equal(p4ClientMatch?.client, 'jesephjiang_I_Nested')
-  assert.equal(resolveP4ClientFromClientsOutput("Client e_trunk 2026/05/13 root E:\\ 'Created. '", 'I:\\CJGame\\trunk'), null)
+  assert.equal(resolveP4ClientFromIniText('[P4Client]\n+Mapping=E:\\CJGame\\trunk|e_trunk', 'I:\\CJGame\\trunk'), null)
 
   const projectDir = path.join(tempRoot, 'Survive')
   fs.mkdirSync(path.join(projectDir, 'Source'), { recursive: true })

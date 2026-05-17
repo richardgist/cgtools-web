@@ -153,6 +153,7 @@ def update_svn(version_info: dict, svn_paths: List[str], dry_run: bool) -> int:
 
     try:
         for svn_path in svn_paths:
+            run_checked(["svn", "revert", "--depth", "infinity", svn_path], dry_run)
             if merged_svn_head:
                 run_checked(["svn", "update", "-r", merged_svn_head, svn_path, "--non-interactive"], dry_run)
 

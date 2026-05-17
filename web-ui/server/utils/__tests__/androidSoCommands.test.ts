@@ -186,6 +186,7 @@ try {
     '--dry-run',
   ], { cwd: tempRoot, encoding: 'utf-8' })
   assert.equal(dryRunResult.status, 0)
+  assert(dryRunResult.stdout.includes('[dry-run] svn revert --depth infinity'))
   assert(dryRunResult.stdout.includes('[dry-run] svn update -r 1466919'))
   assert(dryRunResult.stdout.includes('[dry-run] svn merge -c 1466941'))
   assert(!dryRunResult.stdout.includes('svn update -r 1466941'))

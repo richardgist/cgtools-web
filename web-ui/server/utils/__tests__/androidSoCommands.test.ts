@@ -250,6 +250,7 @@ try {
   assert(!fullBuildPlan.steps.some((step) => step.name.includes('P4') || step.name.includes('SVN') || step.name.includes('Assets')))
   assert(!fullBuildPlan.preview.includes('p4 sync'))
   assert(!fullBuildPlan.preview.includes('svn update'))
+  assert(fullBuildPlan.outputSoCandidates?.includes(path.join(projectDir, 'Binaries', 'Android', 'ShadowTrackerExtra-arm64-es2.so')))
 
   const rebuildPlan = buildAndroidSoJobPlan('rebuildSo', {
     projectRoot: tempRoot,
@@ -264,6 +265,30 @@ try {
   assert.equal(rebuildPlan.cleanupSteps?.length || 0, 0)
   assert(!rebuildPlan.preview.includes('ReplaceManagerTool.py'))
   assert(!rebuildPlan.preview.includes('-generatemanifest'))
+
+  const deletePlan = buildAndroidSoJobPlan('deleteSo', {
+    packageName: 'com.tencent.tmgp.pubgmhd',
+    deleteTempSo: true,
+  })
+
+  assert.deepEqual(deletePlan.steps.map((step) => step.name), [
+    'Delete libUE4.so from app_lib',
+    'Verify app_lib libUE4.so deleted',
+    'Delete temp libUE4.so',
+  ])
+  assert(deletePlan.preview.includes('run-as com.tencent.tmgp.pubgmhd rm -f app_lib/libUE4.so'))
+  assert(deletePlan.preview.includes('/data/local/tmp/libUE4.so'))
+  assert.equal(deletePlan.outputs.deletedSoPath, 'app_lib/libUE4.so')
+
+  const deleteWithoutPackagePlan = buildAndroidSoJobPlan('deleteSo', {
+    packageName: '',
+    deleteTempSo: false,
+  })
+  assert(deleteWithoutPackagePlan.validationErrors.includes('packageName is required.'))
+  assert.deepEqual(deleteWithoutPackagePlan.steps.map((step) => step.name), [
+    'Delete libUE4.so from app_lib',
+    'Verify app_lib libUE4.so deleted',
+  ])
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true })
 }

@@ -6,7 +6,7 @@ import { buildUpdateCodeAssetsPlan, type UpdateCodeAssetsPayload } from './versi
 
 export type AndroidArch = 'arm64-v8a' | 'armeabi-v7a' | 'x86_64'
 export type BuildConfig = 'Development' | 'Test' | 'Shipping'
-export type AndroidSoJobType = 'updateCodeAssets' | 'buildSo' | 'rebuildSo' | 'replaceA' | 'injectB' | 'pushSo'
+export type AndroidSoJobType = 'updateCodeAssets' | 'buildSo' | 'rebuildSo' | 'replaceA' | 'injectB' | 'pushSo' | 'deleteSo'
 
 export interface BuildSoPayload {
   projectRoot: string
@@ -42,7 +42,12 @@ export interface PushSoPayload {
   launchAfterPush?: boolean
 }
 
-export type AndroidSoPayload = UpdateCodeAssetsPayload | BuildSoPayload | ReplaceAPayload | InjectBPayload | PushSoPayload
+export interface DeleteSoPayload {
+  packageName: string
+  deleteTempSo?: boolean
+}
+
+export type AndroidSoPayload = UpdateCodeAssetsPayload | BuildSoPayload | ReplaceAPayload | InjectBPayload | PushSoPayload | DeleteSoPayload
 
 export interface CommandStep {
   name: string
@@ -225,6 +230,10 @@ const buildAndroidSoOutputCandidates = (projectFile: string, config: BuildConfig
   for (const archName of archCandidates) {
     fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${config}-${archName}-es2.so`))
     fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${config}-${archName}.so`))
+    fileCandidates.push(path.join(binariesDir, `${targetName}-${config}-${archName}-es2.so`))
+    fileCandidates.push(path.join(binariesDir, `${targetName}-${config}-${archName}.so`))
+    fileCandidates.push(path.join(binariesDir, `${targetName}-${archName}-es2.so`))
+    fileCandidates.push(path.join(binariesDir, `${targetName}-${archName}.so`))
     if (config === 'Development') {
       fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${archName}-es2.so`))
       fileCandidates.push(path.join(binariesDir, `${targetName}-Android-${archName}.so`))
@@ -608,6 +617,52 @@ const buildPushSoPlan = (payload: PushSoPayload): JobPlan => {
   }
 }
 
+const buildDeleteSoPlan = (payload: DeleteSoPayload): JobPlan => {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const packageName = (payload.packageName || '').trim()
+  const steps: CommandStep[] = [
+    {
+      name: 'Delete libUE4.so from app_lib',
+      cmd: 'adb',
+      args: ['shell', 'run-as', packageName, 'rm', '-f', 'app_lib/libUE4.so'],
+    },
+    {
+      name: 'Verify app_lib libUE4.so deleted',
+      cmd: 'adb',
+      args: ['shell', 'run-as', packageName, 'sh', '-c', 'test ! -e app_lib/libUE4.so && echo deleted: app_lib/libUE4.so'],
+    },
+  ]
+
+  addValidation(errors, process.platform === 'win32', 'Only Windows is supported for this flow.')
+  addValidation(errors, !!packageName, 'packageName is required.')
+  addValidation(errors, isAdbAvailable(), 'adb is not available in PATH.')
+
+  if (payload.deleteTempSo !== false) {
+    steps.push({
+      name: 'Delete temp libUE4.so',
+      cmd: 'adb',
+      args: ['shell', 'rm', '-f', '/data/local/tmp/libUE4.so'],
+    })
+    warnings.push('Temp /data/local/tmp/libUE4.so will also be deleted.')
+  }
+
+  warnings.push(`Run-as delete target package: ${packageName}`)
+
+  return {
+    steps,
+    cleanupSteps: [],
+    outputSoCandidates: [],
+    preview: steps.map((step) => renderCommand(step.cmd, step.args, step.cwd)).join('\n'),
+    validationErrors: errors,
+    warnings,
+    outputs: {
+      deletedSoPath: 'app_lib/libUE4.so',
+      deletedTempSoPath: payload.deleteTempSo !== false ? '/data/local/tmp/libUE4.so' : '',
+    },
+  }
+}
+
 const buildRebuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   const errors: string[] = []
   const warnings: string[] = []
@@ -705,6 +760,9 @@ export const buildAndroidSoJobPlan = (jobType: AndroidSoJobType, payload: Androi
   }
   if (jobType === 'pushSo') {
     return buildPushSoPlan(payload as PushSoPayload)
+  }
+  if (jobType === 'deleteSo') {
+    return buildDeleteSoPlan(payload as DeleteSoPayload)
   }
   return {
     steps: [],

@@ -237,6 +237,20 @@
             <div class="hint-line">SO will always be renamed to <code>libUE4.so</code> at target path.</div>
           </div>
 
+          <div v-else-if="activeTab === 'deleteSo'" class="field-grid">
+            <div class="field-row">
+              <label>Package Name</label>
+              <input v-model="settings.deletePackageName" class="fluent-input path-input" placeholder="com.tencent.tmgp.pubgmhd" />
+            </div>
+            <label class="check-line">
+              <input v-model="settings.deleteTempSo" type="checkbox" />
+              Also delete <code>/data/local/tmp/libUE4.so</code>
+            </label>
+            <div class="hint-line">
+              Deletes the run-as replacement at <code>app_lib/libUE4.so</code>, then verifies it no longer exists.
+            </div>
+          </div>
+
           <div v-else class="field-grid">
             <div class="field-row">
               <label>Library Name</label>
@@ -363,6 +377,8 @@ const SETTINGS_KEYS = [
   'pushUseRunAs',
   'pushPackageName',
   'pushLaunchAfterPush',
+  'deletePackageName',
+  'deleteTempSo',
   'showInstallHint',
   'packageName',
   'launchActivity',
@@ -461,7 +477,7 @@ const buildDefaultSoPath = (projectFile, config, arch, projectRoot) => {
   if (!projectDir) return ''
   const targetName = projectFile ? projectFile.replace(/^.*[\\/]/, '').replace(/\.uproject$/i, '') : 'ShadowTrackerExtra'
   const archName = getAndroidBinaryArchName(arch || 'arm64-v8a')
-  return `${projectDir}\\Binaries\\Android\\${targetName}-Android-${config || 'Development'}-${archName}-es2.so`
+  return `${projectDir}\\Binaries\\Android\\${targetName}-${archName}-es2.so`
 }
 
 const buildDefaultLogPath = (projectFile, config, arch, projectRoot) => {
@@ -494,6 +510,8 @@ const createDefaultSettings = (projectRoot = DEFAULT_PROJECT_ROOT) => {
     pushUseRunAs: true,
     pushPackageName: 'com.tencent.tmgp.pubgmhd',
     pushLaunchAfterPush: true,
+    deletePackageName: 'com.tencent.tmgp.pubgmhd',
+    deleteTempSo: true,
     showInstallHint: true,
     packageName: 'com.tencent.tmgp.pubgmhd',
     launchActivity: 'com.epicgames.ue4.SplashActivity',
@@ -520,6 +538,7 @@ const visibleWorkflowTabs = [
   { key: 'updateCodeAssets', label: '1) Update Code/Assets' },
   { key: 'buildSo', label: '2) Build SO' },
   { key: 'pushSo', label: '3) Push SO' },
+  { key: 'deleteSo', label: '4) Delete SO' },
 ]
 
 const cloneSettings = () => {
@@ -862,6 +881,20 @@ const buildPushPreviewSteps = (soPath) => {
   ]
 }
 
+const buildDeletePreviewSteps = () => {
+  const packageName = settings.deletePackageName?.trim() || 'com.tencent.tmgp.pubgmhd'
+  return [
+    createPreviewStep('Delete libUE4.so from app_lib', `adb shell run-as ${packageName} rm -f app_lib/libUE4.so`),
+    createPreviewStep(
+      'Verify app_lib libUE4.so deleted',
+      `adb shell run-as ${packageName} sh -c "test ! -e app_lib/libUE4.so && echo deleted: app_lib/libUE4.so"`,
+    ),
+    ...(settings.deleteTempSo !== false ? [
+      createPreviewStep('Delete temp libUE4.so', 'adb shell rm -f /data/local/tmp/libUE4.so'),
+    ] : []),
+  ]
+}
+
 const commandPreviewSteps = computed(() => {
   if (activeTab.value === 'updateCodeAssets') {
     return buildVersionUpdatePreviewSteps()
@@ -898,6 +931,9 @@ const commandPreviewSteps = computed(() => {
   }
   if (activeTab.value === 'pushSo') {
     return buildPushPreviewSteps(settings.soPath)
+  }
+  if (activeTab.value === 'deleteSo') {
+    return buildDeletePreviewSteps()
   }
   return [
     createPreviewStep('APL snippet', aplSnippet.value),
@@ -1189,6 +1225,12 @@ const buildPayload = () => {
       useRunAs: settings.pushUseRunAs,
       packageName: settings.pushUseRunAs ? (settings.pushPackageName?.trim() || undefined) : undefined,
       launchAfterPush: settings.pushUseRunAs ? !!settings.pushLaunchAfterPush : false,
+    }
+  }
+  if (activeTab.value === 'deleteSo') {
+    return {
+      packageName: settings.deletePackageName?.trim() || undefined,
+      deleteTempSo: settings.deleteTempSo !== false,
     }
   }
   return {

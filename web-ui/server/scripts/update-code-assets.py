@@ -77,8 +77,8 @@ def run_checked(args: Sequence[str], dry_run: bool) -> None:
         raise RuntimeError(f"command failed with exitCode={completed.returncode}: {render_command(args)}")
 
 
-def p4_specs(paths: Iterable[str], revision: str, single_change: bool) -> List[str]:
-    suffix = f"\\...@={revision}" if single_change else f"\\...@{revision}"
+def p4_specs(paths: Iterable[str], revision: str) -> List[str]:
+    suffix = f"\\...@{revision}"
     return [f"{path}{suffix}" for path in paths]
 
 
@@ -111,24 +111,13 @@ def update_p4(version_info: dict, p4_paths: List[str], parallel: bool, dry_run: 
 
     try:
         if merged_p4_head:
-            sync_p4_many(p4_specs(p4_paths, merged_p4_head, False), f"base @{merged_p4_head}", parallel, dry_run)
-        for change in p4_merge:
-            sync_p4_many(p4_specs(p4_paths, change, True), f"change @{change}", parallel, dry_run)
+            sync_p4_many(p4_specs(p4_paths, merged_p4_head), f"base @{merged_p4_head}", parallel, dry_run)
+        for revision in p4_merge:
+            sync_p4_many(p4_specs(p4_paths, revision), f"update @{revision}", parallel, dry_run)
     except Exception as exc:
         print(f"[version] {exc}", file=sys.stderr, flush=True)
         return 1
     return 0
-
-
-def get_svn_url(svn_path: str, dry_run: bool) -> str:
-    if dry_run:
-        print(f"[dry-run] svn info --show-item url {render_command([svn_path])}", flush=True)
-        return "<svn-url>"
-    completed = run_command(["svn", "info", "--show-item", "url", svn_path], dry_run=False, capture_stdout=True)
-    if completed.returncode != 0:
-        stderr = (completed.stderr or "").strip()
-        raise RuntimeError(f"svn info failed with exitCode={completed.returncode}: {stderr}")
-    return (completed.stdout or "").strip()
 
 
 def update_svn(version_info: dict, svn_path: str, dry_run: bool) -> int:
@@ -144,10 +133,8 @@ def update_svn(version_info: dict, svn_path: str, dry_run: bool) -> int:
     try:
         if merged_svn_head:
             run_checked(["svn", "update", "-r", merged_svn_head, svn_path, "--non-interactive"], dry_run)
-        if svn_merge:
-            svn_url = get_svn_url(svn_path, dry_run)
-            for revision in svn_merge:
-                run_checked(["svn", "merge", "-c", revision, svn_url, svn_path, "--non-interactive", "--accept", "postpone"], dry_run)
+        for revision in svn_merge:
+            run_checked(["svn", "update", "-r", revision, svn_path, "--non-interactive"], dry_run)
     except Exception as exc:
         print(f"[version] {exc}", file=sys.stderr, flush=True)
         return 1

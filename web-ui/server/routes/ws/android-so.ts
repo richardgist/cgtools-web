@@ -221,7 +221,7 @@ const runStep = async (
       cwd: step.cwd,
       shell: false,
       windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      env: { ...process.env, ...(step.env || {}), PYTHONIOENCODING: 'utf-8' },
     })
 
     runState.process = proc

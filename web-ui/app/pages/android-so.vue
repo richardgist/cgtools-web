@@ -929,8 +929,19 @@ const saveCurrentProfile = () => {
   persistProfileStore()
 }
 
+const resolveLogType = (type, text) => {
+  const value = String(text || '').trimStart().toLowerCase()
+  if (value.startsWith('[warning]')) return 'warning'
+  if (value.startsWith('[error]') || value.startsWith('[spawn error]') || value.startsWith('[cleanup error]')) return 'error'
+  if (value.startsWith('[terminated]')) return 'warning'
+  if (value.startsWith('[end] exitcode=0') || value.includes(' success') || value.includes('succeeded')) return 'success'
+  if (value.startsWith('[info]') || value.startsWith('[start]') || value.startsWith('[step]') || value.startsWith('[logs]') || value.startsWith('[run]') || value.startsWith('[stop]') || value.startsWith('[end]')) return 'info'
+  if (type === 'stderr') return 'error'
+  return type || 'stdout'
+}
+
 const appendLog = (type, text) => {
-  logs.value.push({ type, text })
+  logs.value.push({ type: resolveLogType(type, text), text })
   nextTick(() => {
     if (terminalEl.value) {
       terminalEl.value.scrollTop = terminalEl.value.scrollHeight
@@ -1620,11 +1631,27 @@ onMounted(async () => {
 }
 
 .terminal .info {
-  color: #7ecbff;
+  color: #68c7ff;
+  white-space: pre-wrap;
 }
 
 .terminal .stdout {
   color: #d0d0d0;
+  white-space: pre-wrap;
+}
+
+.terminal .success {
+  color: #65d68a;
+  white-space: pre-wrap;
+}
+
+.terminal .warning {
+  color: #ffd166;
+  white-space: pre-wrap;
+}
+
+.terminal .error {
+  color: #ff6b7a;
   white-space: pre-wrap;
 }
 

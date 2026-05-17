@@ -49,6 +49,7 @@ export interface CommandStep {
   cmd: string
   args: string[]
   cwd?: string
+  env?: Record<string, string>
   internalAction?: {
     type: 'updateDefaultEngineIni'
     defaultEngineIniPath: string

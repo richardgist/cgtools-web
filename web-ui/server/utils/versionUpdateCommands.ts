@@ -1,5 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import { spawnSync } from 'child_process'
 import type { CommandStep, JobPlan } from './androidSoCommands'
 
 export interface BuildVersionUpdateInfo {
@@ -20,6 +21,11 @@ export interface UpdateCodeAssetsPayload {
 const UPDATE_CODE_ASSETS_SCRIPT = path.resolve(process.cwd(), 'server', 'scripts', 'update-code-assets.py')
 const UPDATE_CODE_ASSETS_PATHS_INI = path.resolve(process.cwd(), 'server', 'config', 'android-so-update-paths.ini')
 
+export interface P4ClientRootMatch {
+  client: string
+  root: string
+}
+
 const quoteArg = (value: string) => {
   if (value.length === 0) return '""'
   return /[\s"&|<>^]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value
@@ -28,6 +34,71 @@ const quoteArg = (value: string) => {
 const renderCommand = (cmd: string, args: string[], cwd?: string) => {
   const commandLine = [quoteArg(cmd), ...args.map(quoteArg)].join(' ')
   return cwd ? `(cwd=${cwd}) ${commandLine}` : commandLine
+}
+
+const normalizeP4RootPath = (value: string) => {
+  const normalized = String(value || '').trim().replace(/\//g, '\\')
+  if (/^[A-Za-z]:\\?$/.test(normalized)) {
+    return `${normalized.slice(0, 2).toUpperCase()}\\`
+  }
+  return normalized.replace(/[\\]+$/, '')
+}
+
+const isPathUnderRoot = (targetPath: string, rootPath: string) => {
+  const target = normalizeP4RootPath(targetPath).toLowerCase()
+  const root = normalizeP4RootPath(rootPath).toLowerCase()
+  if (!target || !root) {
+    return false
+  }
+  if (/^[a-z]:\\$/.test(root)) {
+    return target.startsWith(root)
+  }
+  return target === root || target.startsWith(`${root}\\`)
+}
+
+export const resolveP4ClientFromClientsOutput = (clientsOutput: string, projectRoot: string): P4ClientRootMatch | null => {
+  const matches = String(clientsOutput || '')
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(/^Client\s+(\S+)\s+\S+\s+root\s+(.+?)(?:\s+'.*)?$/)
+      if (!match) {
+        return null
+      }
+      return {
+        client: match[1] || '',
+        root: match[2] || '',
+      }
+    })
+    .filter((match): match is P4ClientRootMatch => !!match?.client && !!match.root)
+    .filter((match) => isPathUnderRoot(projectRoot, match.root))
+    .sort((left, right) => normalizeP4RootPath(right.root).length - normalizeP4RootPath(left.root).length)
+
+  return matches[0] || null
+}
+
+const readCurrentP4User = () => {
+  const result = spawnSync('p4', ['info'], {
+    encoding: 'utf-8',
+    shell: false,
+    windowsHide: true,
+  })
+  const output = `${result.stdout || ''}${result.stderr || ''}`
+  const match = output.match(/^User name:\s*(.+)$/m)
+  return match?.[1]?.trim() || ''
+}
+
+const resolveP4ClientForProjectRoot = (projectRoot: string): P4ClientRootMatch | null => {
+  const user = readCurrentP4User()
+  const args = user ? ['clients', '-u', user] : ['clients']
+  const result = spawnSync('p4', args, {
+    encoding: 'utf-8',
+    shell: false,
+    windowsHide: true,
+  })
+  if (result.status !== 0) {
+    return null
+  }
+  return resolveP4ClientFromClientsOutput(result.stdout || '', projectRoot)
 }
 
 const addValidation = (errors: string[], condition: boolean, message: string) => {
@@ -91,7 +162,7 @@ const parseP4SafePathsIni = (text: string): P4SafePathsIniConfig => {
 
     const sectionMatch = line.match(/^\[([^\]]+)\]$/)
     if (sectionMatch) {
-      currentSection = sectionMatch[1].trim()
+      currentSection = (sectionMatch[1] || '').trim()
       rawIni[currentSection] ||= {}
       continue
     }
@@ -101,15 +172,21 @@ const parseP4SafePathsIni = (text: string): P4SafePathsIniConfig => {
       continue
     }
 
-    const isArrayEntry = keyMatch[1].trim().startsWith('+')
-    const key = keyMatch[1].trim().replace(/^\+/, '')
-    const value = keyMatch[2].trim()
+    const rawKey = keyMatch[1] || ''
+    const rawValue = keyMatch[2] || ''
+    const isArrayEntry = rawKey.trim().startsWith('+')
+    const key = rawKey.trim().replace(/^\+/, '')
+    const value = rawValue.trim()
     rawIni[currentSection] ||= {}
+    const section = rawIni[currentSection]
+    if (!section) {
+      continue
+    }
     if (isArrayEntry) {
-      const previous = rawIni[currentSection][key]
-      rawIni[currentSection][key] = [...asIniArray(previous), value].filter(Boolean)
+      const previous = section[key]
+      section[key] = [...asIniArray(previous), value].filter(Boolean)
     } else {
-      rawIni[currentSection][key] = value
+      section[key] = value
     }
   }
 
@@ -208,6 +285,7 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   const hasAssetVersions = !!(versionInfo.mergedP4Head || versionInfo.p4Merge.length)
   const hasSvnVersions = !!(versionInfo.mergedSvnHead || versionInfo.svnMerge.length)
   const p4SyncPaths = readConfiguredP4SyncPaths(projectRoot)
+  const p4ClientMatch = hasAssetVersions ? resolveP4ClientForProjectRoot(projectRoot) : null
   const steps: CommandStep[] = []
 
   addValidation(errors, process.platform === 'win32', 'Only Windows is supported for this flow.')
@@ -229,6 +307,7 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
     cmd: 'python',
     args: buildVersionUpdateArgs('p4', payload.versionUpdateText || '', projectDir, p4SyncPaths, payload.p4Parallel !== false, payload.dryRun === true),
     cwd: projectRoot,
+    env: p4ClientMatch ? { P4CLIENT: p4ClientMatch.client } : undefined,
   })
 
   steps.push({
@@ -240,6 +319,12 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
 
   warnings.push(`Parsed version text: P4@${versionInfo.mergedP4Head || '-'}, SVN@${versionInfo.mergedSvnHead || '-'}, P4Merge=${versionInfo.p4Merge.join(',') || '-'}, SVNMerge=${versionInfo.svnMerge.join(',') || '-'}`)
   if (hasAssetVersions) {
+    if (p4ClientMatch) {
+      // P4 的当前 client 来自进程环境，按工程根目录自动覆盖，避免用户在不同盘符工程间手动切 P4CLIENT。
+      warnings.push(`P4 client auto-selected: ${p4ClientMatch.client} (root=${p4ClientMatch.root})`)
+    } else {
+      warnings.push('P4 client auto-select skipped: no client root matched the selected project root; current P4 environment will be used.')
+    }
     warnings.push(`P4 safe sync paths: ${p4SyncPaths.join('; ')}`)
   }
 

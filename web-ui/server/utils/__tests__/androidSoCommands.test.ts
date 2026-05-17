@@ -90,14 +90,20 @@ try {
   assert.equal(resolveP4ClientFromIniText('[P4Client]\n+Mapping=E:\\CJGame\\trunk|e_trunk', 'I:\\CJGame\\trunk'), null)
 
   const projectDir = path.join(tempRoot, 'Survive')
+  fs.mkdirSync(path.join(projectDir, 'AutoPatch'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Config'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Source'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Content', 'Maps'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Content', 'UI'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Content', '.svn'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Content', 'Saved'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Plugins'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'Tools'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'Saved'), { recursive: true })
   fs.writeFileSync(path.join(projectDir, 'ShadowTrackerExtra.uproject'), '{}', 'utf-8')
   fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Engine', 'Source'), { recursive: true })
+  fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Samples'), { recursive: true })
+  fs.mkdirSync(path.join(tempRoot, 'UE4181', 'Templates'), { recursive: true })
 
   const configuredIniText = [
     '[Root:Survive]',
@@ -165,8 +171,8 @@ try {
   ], { cwd: tempRoot, encoding: 'utf-8' })
   assert.equal(dryRunResult.status, 0)
   assert(dryRunResult.stdout.includes('[dry-run] svn update -r 1466919'))
-  assert(dryRunResult.stdout.includes('[dry-run] svn update -r 1466941'))
-  assert(!dryRunResult.stdout.includes('svn merge -c'))
+  assert(dryRunResult.stdout.includes('[dry-run] svn merge -c 1466941'))
+  assert(!dryRunResult.stdout.includes('svn update -r 1466941'))
 
   const p4DryRunResult = spawnSync('python', [
     updateScriptPath,
@@ -181,8 +187,7 @@ try {
   assert.equal(p4DryRunResult.status, 0)
   assert(p4DryRunResult.stdout.includes('[dry-run] p4 sync'))
   assert(p4DryRunResult.stdout.includes('@5996891'))
-  assert(p4DryRunResult.stdout.includes('@5996991'))
-  assert(!p4DryRunResult.stdout.includes('@=5996991'))
+  assert(p4DryRunResult.stdout.includes('@=5996991'))
 
   const configuredContentPlan = buildAndroidSoJobPlan('updateCodeAssets', {
     projectRoot: tempRoot,
@@ -194,7 +199,7 @@ try {
   })
   const configuredP4PathsJson = configuredContentPlan.steps[0]?.args[configuredContentPlan.steps[0]?.args.indexOf('--p4-sync-paths-json') + 1] || '[]'
   const configuredP4Paths = JSON.parse(configuredP4PathsJson)
-  assert(configuredP4Paths.includes(path.join(projectDir, 'Source')))
+  assert(configuredP4Paths.includes(path.join(projectDir, 'AutoPatch')))
   assert(configuredP4Paths.includes(path.join(projectDir, 'Content', 'Maps')))
   assert(configuredP4Paths.includes(path.join(projectDir, 'Content', 'UI')))
   assert(!configuredP4Paths.includes(path.join(tempRoot, 'DoesNotMatter')))
@@ -207,7 +212,7 @@ try {
   })
   const defaultP4PathsJson = defaultContentPlan.steps[0]?.args[defaultContentPlan.steps[0]?.args.indexOf('--p4-sync-paths-json') + 1] || '[]'
   const defaultP4Paths = JSON.parse(defaultP4PathsJson)
-  assert(defaultP4Paths.includes(path.join(projectDir, 'Source')))
+  assert(defaultP4Paths.includes(path.join(projectDir, 'AutoPatch')))
   assert(defaultP4Paths.includes(path.join(projectDir, 'Content', 'Maps')))
   assert(defaultP4Paths.includes(path.join(projectDir, 'Content', 'UI')))
   assert(!defaultP4Paths.includes(path.join(projectDir, 'Content')))

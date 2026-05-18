@@ -154,10 +154,19 @@
               <input v-model.number="settings.maxParallelActions" class="fluent-input" type="number" min="1" max="128" placeholder="8" />
             </div>
             <div class="hint-line">Build uses UnrealBuildTool direct mode (not UAT BuildCookRun).</div>
-            <div v-if="settings.buildMode === 'full'" class="hint-line">Full mode updates ABI config, prepares ReplaceManager, generates manifest, then builds SO.</div>
+            <div v-if="settings.buildMode === 'full'" class="hint-line">Full mode updates ABI config, prepares ReplaceManager, generates manifest, then builds SO. ReplaceManager clean is a separate manual step.</div>
             <div v-else class="hint-line warn">Rebuild-only mode skips ABI config, ReplaceManager, and manifest. Use it after a full Build SO has already succeeded.</div>
             <div class="hint-line">Shipping config will auto append <code>-ShippingDev</code>.</div>
             <div class="hint-line">Expected output: <code>{{ expectedSoOutputPath }}</code></div>
+          </div>
+
+          <div v-else-if="activeTab === 'cleanReplaceManager'" class="field-grid">
+            <div class="hint-line warn">
+              This runs ReplaceManager <code>clean</code> only. Use it when you are done with the current logging/build/replace loop and want to restore ReplaceManager state.
+            </div>
+            <div class="hint-line">
+              Project root: <code>{{ settings.projectRoot }}</code>
+            </div>
           </div>
 
           <div v-else-if="activeTab === 'replaceA'" class="field-grid">
@@ -537,8 +546,9 @@ const settings = reactive(createDefaultSettings(DEFAULT_PROJECT_ROOT))
 const visibleWorkflowTabs = [
   { key: 'updateCodeAssets', label: '1) Update Code/Assets' },
   { key: 'buildSo', label: '2) Build SO' },
-  { key: 'pushSo', label: '3) Push SO' },
-  { key: 'deleteSo', label: '4) Delete SO' },
+  { key: 'cleanReplaceManager', label: '3) Clean ReplaceManager' },
+  { key: 'pushSo', label: '4) Push SO' },
+  { key: 'deleteSo', label: '5) Delete SO' },
 ]
 
 const cloneSettings = () => {
@@ -830,14 +840,23 @@ const buildBuildPreviewSteps = () => {
   const iniCommand = `cgtools:update-default-engine-ini -Path=${quote(defaultEngineIniPath.value)} ${Object.entries(getDefaultEngineIniAndroidAbiSettings(settings.arch)).map(([key, value]) => `-${key}=${value}`).join(' ')}`
   const manifestCommand = `${baseCommand} -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
   const buildCommand = `${baseCommand}${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
-  const cleanCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} clean`
 
   return [
     createPreviewStep('Update DefaultEngine.ini Android ABI', iniCommand, projectDir),
     createPreviewStep('Prepare ReplaceManager patch', replaceCommand, replaceManagerDir),
     createPreviewStep('Generate UBT manifest', manifestCommand, settings.projectRoot),
     createPreviewStep('Build Android SO with UBT', buildCommand, settings.projectRoot),
-    createPreviewStep('Restore ReplaceManager state', cleanCommand, replaceManagerDir),
+  ]
+}
+
+const buildCleanReplaceManagerPreviewSteps = () => {
+  const replaceManagerDir = 'I:\\cgtools\\ReplaceManager\\RevertTool'
+  const replaceManagerSourceDir = 'I:\\cgtools\\ReplaceManager'
+  const replaceManagerTool = `${replaceManagerDir}\\ReplaceManagerTool.py`
+  const cleanCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} clean`
+
+  return [
+    createPreviewStep('Clean ReplaceManager state', cleanCommand, replaceManagerDir),
   ]
 }
 
@@ -901,6 +920,9 @@ const commandPreviewSteps = computed(() => {
   }
   if (activeTab.value === 'buildSo') {
     return settings.buildMode === 'rebuildOnly' ? buildRebuildPreviewSteps() : buildBuildPreviewSteps()
+  }
+  if (activeTab.value === 'cleanReplaceManager') {
+    return buildCleanReplaceManagerPreviewSteps()
   }
   if (activeTab.value === 'replaceA') {
     return [
@@ -1207,6 +1229,11 @@ const buildPayload = () => {
       arch: settings.arch,
       logPath: settings.logPath?.trim() || undefined,
       maxParallelActions: Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? settings.maxParallelActions : undefined,
+    }
+  }
+  if (activeTab.value === 'cleanReplaceManager') {
+    return {
+      projectRoot: settings.projectRoot,
     }
   }
   if (activeTab.value === 'replaceA') {

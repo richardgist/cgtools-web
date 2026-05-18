@@ -6,7 +6,7 @@ import { buildUpdateCodeAssetsPlan, type UpdateCodeAssetsPayload } from './versi
 
 export type AndroidArch = 'arm64-v8a' | 'armeabi-v7a' | 'x86_64'
 export type BuildConfig = 'Development' | 'Test' | 'Shipping'
-export type AndroidSoJobType = 'updateCodeAssets' | 'buildSo' | 'rebuildSo' | 'replaceA' | 'injectB' | 'pushSo' | 'deleteSo'
+export type AndroidSoJobType = 'updateCodeAssets' | 'buildSo' | 'rebuildSo' | 'cleanReplaceManager' | 'replaceA' | 'injectB' | 'pushSo' | 'deleteSo'
 
 export interface BuildSoPayload {
   projectRoot: string
@@ -47,7 +47,11 @@ export interface DeleteSoPayload {
   deleteTempSo?: boolean
 }
 
-export type AndroidSoPayload = UpdateCodeAssetsPayload | BuildSoPayload | ReplaceAPayload | InjectBPayload | PushSoPayload | DeleteSoPayload
+export interface CleanReplaceManagerPayload {
+  projectRoot: string
+}
+
+export type AndroidSoPayload = UpdateCodeAssetsPayload | BuildSoPayload | CleanReplaceManagerPayload | ReplaceAPayload | InjectBPayload | PushSoPayload | DeleteSoPayload
 
 export interface CommandStep {
   name: string
@@ -324,6 +328,7 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
   warnings.push(`DefaultEngine.ini Android ABI will be updated before build: ${defaultEngineIniPath}`)
   warnings.push(`ReplaceManager source: ${REPLACE_MANAGER_SOURCE_DIR}`)
   warnings.push('ReplaceManager will run in non-interactive Python mode.')
+  warnings.push('ReplaceManager clean is manual now. Run Clean ReplaceManager state only when you want to restore it.')
 
   const defaultEngineIniCommand = buildDefaultEngineIniPreviewCommand(defaultEngineIniPath, payload.arch)
   const defaultEngineIniStep: CommandStep = {
@@ -359,22 +364,15 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
     cwd: payload.projectRoot,
   }
 
-  const restoreReplaceManagerStep: CommandStep = {
-    name: 'Restore ReplaceManager state',
-    cmd: 'python',
-    args: [REPLACE_MANAGER_TOOL_PY, REPLACE_MANAGER_SOURCE_DIR, payload.projectRoot, 'clean'],
-    cwd: REPLACE_MANAGER_DIR,
-  }
   return {
     steps: [defaultEngineIniStep, replaceManagerStep, manifestStep, buildStep],
-    cleanupSteps: [restoreReplaceManagerStep],
+    cleanupSteps: [],
     outputSoCandidates,
     preview: [
       renderCommand(defaultEngineIniStep.cmd, defaultEngineIniStep.args, defaultEngineIniStep.cwd),
       renderCommand(replaceManagerStep.cmd, replaceManagerStep.args, replaceManagerStep.cwd),
       renderCommand(manifestStep.cmd, manifestStep.args, manifestStep.cwd),
       renderCommand(buildStep.cmd, buildStep.args, buildStep.cwd),
-      renderCommand(restoreReplaceManagerStep.cmd, restoreReplaceManagerStep.args, restoreReplaceManagerStep.cwd),
     ].join('\n'),
     validationErrors: errors,
     warnings,
@@ -382,6 +380,36 @@ const buildBuildSoPlan = (payload: BuildSoPayload): JobPlan => {
       soPath: outputSoPath,
       buildLogPath: resolvedLogPath,
     },
+  }
+}
+
+const buildCleanReplaceManagerPlan = (payload: CleanReplaceManagerPayload): JobPlan => {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  addValidation(errors, process.platform === 'win32', 'Only Windows is supported for this flow.')
+  addValidation(errors, fs.existsSync(payload.projectRoot || ''), `projectRoot not found: ${payload.projectRoot}`)
+  addValidation(errors, fs.existsSync(REPLACE_MANAGER_TOOL_PY), `ReplaceManagerTool.py not found: ${REPLACE_MANAGER_TOOL_PY}`)
+  addValidation(errors, fs.existsSync(REPLACE_MANAGER_CONFIG_JSON), `ReplaceConfig.json not found: ${REPLACE_MANAGER_CONFIG_JSON}`)
+
+  const cleanStep: CommandStep = {
+    name: 'Clean ReplaceManager state',
+    cmd: 'python',
+    args: [REPLACE_MANAGER_TOOL_PY, REPLACE_MANAGER_SOURCE_DIR, payload.projectRoot, 'clean'],
+    cwd: REPLACE_MANAGER_DIR,
+  }
+
+  warnings.push(`ReplaceManager source: ${REPLACE_MANAGER_SOURCE_DIR}`)
+  warnings.push('This only restores/cleans ReplaceManager state; it does not build or replace libUE4.so.')
+
+  return {
+    steps: [cleanStep],
+    cleanupSteps: [],
+    outputSoCandidates: [],
+    preview: renderCommand(cleanStep.cmd, cleanStep.args, cleanStep.cwd),
+    validationErrors: errors,
+    warnings,
+    outputs: {},
   }
 }
 
@@ -752,6 +780,9 @@ export const buildAndroidSoJobPlan = (jobType: AndroidSoJobType, payload: Androi
   }
   if (jobType === 'rebuildSo') {
     return buildRebuildSoPlan(payload as BuildSoPayload)
+  }
+  if (jobType === 'cleanReplaceManager') {
+    return buildCleanReplaceManagerPlan(payload as CleanReplaceManagerPayload)
   }
   if (jobType === 'replaceA') {
     return buildReplaceSoPlan(payload as ReplaceAPayload)

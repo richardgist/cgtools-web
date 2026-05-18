@@ -248,9 +248,19 @@ try {
   } as any)
 
   assert(!fullBuildPlan.steps.some((step) => step.name.includes('P4') || step.name.includes('SVN') || step.name.includes('Assets')))
+  assert.equal(fullBuildPlan.cleanupSteps?.length || 0, 0)
+  assert(!fullBuildPlan.preview.includes(' clean'))
   assert(!fullBuildPlan.preview.includes('p4 sync'))
   assert(!fullBuildPlan.preview.includes('svn update'))
   assert(fullBuildPlan.outputSoCandidates?.includes(path.join(projectDir, 'Binaries', 'Android', 'ShadowTrackerExtra-arm64-es2.so')))
+
+  const cleanReplaceManagerPlan = buildAndroidSoJobPlan('cleanReplaceManager', {
+    projectRoot: tempRoot,
+  })
+  assert.deepEqual(cleanReplaceManagerPlan.steps.map((step) => step.name), ['Clean ReplaceManager state'])
+  assert.equal(cleanReplaceManagerPlan.cleanupSteps?.length || 0, 0)
+  assert(cleanReplaceManagerPlan.preview.includes('ReplaceManagerTool.py'))
+  assert(cleanReplaceManagerPlan.preview.includes(' clean'))
 
   const rebuildPlan = buildAndroidSoJobPlan('rebuildSo', {
     projectRoot: tempRoot,

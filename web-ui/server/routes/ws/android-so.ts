@@ -32,6 +32,7 @@ type StepResult = {
 
 type StepLogTarget = {
   path: string
+  startedAtMs: number
 }
 
 const activeRuns = new Map<string, ActiveRun>()
@@ -78,14 +79,17 @@ const createRunLogDir = (jobType: AndroidSoJobType) => {
 const createStepLogTarget = (runLogDir: string, index: number, name: string): StepLogTarget => {
   const stepNo = String(index + 1).padStart(2, '0')
   const logPath = path.join(runLogDir, `${stepNo}-${sanitizeLogFileName(name)}.log`)
+  const startedAtMs = Date.now()
   fs.writeFileSync(logPath, `# ${name}\n# Started: ${new Date().toLocaleString()}\n\n`, 'utf-8')
-  return { path: logPath }
+  return { path: logPath, startedAtMs }
 }
 
 const appendStepLog = (target: StepLogTarget | null | undefined, text: string) => {
   if (!target) return
   fs.appendFileSync(target.path, text, 'utf-8')
 }
+
+const getStepDurationMs = (target: StepLogTarget) => Math.max(0, Date.now() - target.startedAtMs)
 
 const resolveBuiltSoPath = (candidates: Array<string | undefined>) => {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || ''
@@ -200,13 +204,13 @@ const runStep = async (
       const changedText = result.changed ? 'updated' : 'already current'
       const stdout = `[info] DefaultEngine.ini ${changedText}: ${result.defaultEngineIniPath} (${settingsText})\n`
       appendStepLog(logTarget, stdout)
-      appendStepLog(logTarget, `\n# Finished: ${new Date().toLocaleString()}\n# ExitCode: 0\n`)
+      appendStepLog(logTarget, `\n# Finished: ${new Date().toLocaleString()}\n# DurationMs: ${logTarget ? getStepDurationMs(logTarget) : 0}\n# ExitCode: 0\n`)
       send(peer, { type: 'stdout', data: stdout })
       return { code: 0, stdout, stderr: '' }
     } catch (error: any) {
       const stderr = `[error] Failed to update DefaultEngine.ini: ${error?.message || error}\n`
       appendStepLog(logTarget, stderr)
-      appendStepLog(logTarget, `\n# Finished: ${new Date().toLocaleString()}\n# ExitCode: 1\n`)
+      appendStepLog(logTarget, `\n# Finished: ${new Date().toLocaleString()}\n# DurationMs: ${logTarget ? getStepDurationMs(logTarget) : 0}\n# ExitCode: 1\n`)
       send(peer, { type: 'stderr', data: stderr })
       return { code: 1, stdout: '', stderr }
     }
@@ -257,7 +261,7 @@ const runStep = async (
 
     proc.on('close', (code: number | null) => {
       runState.process = null
-      appendStepLog(logTarget, `\n# Finished: ${new Date().toLocaleString()}\n# ExitCode: ${typeof code === 'number' ? code : 1}\n`)
+      appendStepLog(logTarget, `\n# Finished: ${new Date().toLocaleString()}\n# DurationMs: ${logTarget ? getStepDurationMs(logTarget) : 0}\n# ExitCode: ${typeof code === 'number' ? code : 1}\n`)
       resolve({
         code: typeof code === 'number' ? code : 1,
         stdout,
@@ -347,7 +351,7 @@ export default defineWebSocketHandler({
           const logTarget = createStepLogTarget(runLogDir, index, step.name)
           send(typedPeer, { type: 'step', name: step.name, logPath: logTarget.path })
           const result = await runStep(typedPeer, runState, step, logTarget)
-          send(typedPeer, { type: 'stepEnd', name: step.name, exitCode: runState.terminating ? -1 : result.code, logPath: logTarget.path })
+          send(typedPeer, { type: 'stepEnd', name: step.name, exitCode: runState.terminating ? -1 : result.code, logPath: logTarget.path, durationMs: getStepDurationMs(logTarget) })
 
           if (runState.terminating) {
             exitCode = -1
@@ -372,7 +376,7 @@ export default defineWebSocketHandler({
           const logTarget = createStepLogTarget(runLogDir, plan.steps.length + cleanupIndex, cleanupStep.name)
           send(typedPeer, { type: 'step', name: cleanupStep.name, logPath: logTarget.path })
           const cleanupResult = await runStep(typedPeer, runState, cleanupStep, logTarget)
-          send(typedPeer, { type: 'stepEnd', name: cleanupStep.name, exitCode: cleanupResult.code, logPath: logTarget.path })
+          send(typedPeer, { type: 'stepEnd', name: cleanupStep.name, exitCode: cleanupResult.code, logPath: logTarget.path, durationMs: getStepDurationMs(logTarget) })
           if (cleanupResult.code !== 0) {
             send(typedPeer, {
               type: 'stderr',

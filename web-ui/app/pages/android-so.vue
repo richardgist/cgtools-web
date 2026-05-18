@@ -310,7 +310,10 @@
                 </div>
                 <div class="workflow-node-name">{{ node.name }}</div>
                 <div class="workflow-node-footer">
-                  <span class="workflow-node-status">{{ node.statusLabel }}</span>
+                  <div class="workflow-node-meta">
+                    <span class="workflow-node-status">{{ node.statusLabel }}</span>
+                    <span v-if="node.elapsedLabel" class="workflow-node-duration">{{ node.elapsedLabel }}</span>
+                  </div>
                   <button
                     v-if="node.logPath"
                     class="workflow-log-btn"
@@ -364,7 +367,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 const LEGACY_STORAGE_KEY = 'cgtools_android_so_settings_v1'
 const STORAGE_KEY = 'cgtools_android_so_profiles_v2'
@@ -402,9 +405,12 @@ const terminalEl = ref(null)
 const logs = ref([])
 const lastOutputs = ref(null)
 const stepStates = ref({})
+const stepStartedAt = ref({})
+const stepDurations = ref({})
 const stepLogPaths = ref({})
 const activeStepName = ref('')
 const runLogDir = ref('')
+const nowMs = ref(Date.now())
 const projectRootDraft = ref(DEFAULT_PROJECT_ROOT)
 const projectRootOptions = ref([DEFAULT_PROJECT_ROOT])
 let ws = null
@@ -412,6 +418,7 @@ let profileStore = { activeProjectRoot: '', profiles: {} }
 let activeProjectRootKey = ''
 let isApplyingSettings = false
 let detectionRequestId = 0
+let elapsedTimer = null
 
 const normalizeWindowsPath = (value) => String(value || '').trim().replace(/\//g, '\\')
 
@@ -705,6 +712,26 @@ const setStepStatusByName = (name, status) => {
   }
 }
 
+const setStepStartedByName = (name, startedAtMs = Date.now()) => {
+  const keys = getStepKeysByName(name)
+  if (keys.length === 0) return
+  stepStartedAt.value = {
+    ...stepStartedAt.value,
+    ...Object.fromEntries(keys.map((key) => [key, startedAtMs])),
+  }
+}
+
+const setStepDurationByName = (name, durationMs) => {
+  const resolvedDurationMs = Number(durationMs)
+  if (!Number.isFinite(resolvedDurationMs)) return
+  const keys = getStepKeysByName(name)
+  if (keys.length === 0) return
+  stepDurations.value = {
+    ...stepDurations.value,
+    ...Object.fromEntries(keys.map((key) => [key, Math.max(0, resolvedDurationMs)])),
+  }
+}
+
 const setStepLogPathByName = (name, logPath) => {
   if (!logPath) return
   const keys = getStepKeysByName(name)
@@ -719,6 +746,8 @@ const resetWorkflowState = () => {
   stepStates.value = Object.fromEntries(
     commandPreviewSteps.value.map((step, index) => [createStepKey(step, index), 'pending']),
   )
+  stepStartedAt.value = {}
+  stepDurations.value = {}
   stepLogPaths.value = {}
   activeStepName.value = ''
 }
@@ -729,6 +758,50 @@ const getWorkflowStatusMeta = (status) => {
   if (status === 'failed') return { label: 'Failed', icon: '!' }
   if (status === 'stopped') return { label: 'Stopped', icon: 'X' }
   return { label: 'Pending', icon: '-' }
+}
+
+const formatDuration = (durationMs) => {
+  const resolvedDurationMs = Number(durationMs)
+  if (!Number.isFinite(resolvedDurationMs) || resolvedDurationMs < 0) return ''
+  if (resolvedDurationMs < 1000) {
+    return `${Math.max(1, Math.round(resolvedDurationMs))}ms`
+  }
+
+  const seconds = resolvedDurationMs / 1000
+  if (seconds < 60) {
+    return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`
+  }
+
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.round(seconds % 60)
+  return `${minutes}m ${String(remainingSeconds).padStart(2, '0')}s`
+}
+
+const getStepElapsedLabel = (key, status) => {
+  const durationMs = stepDurations.value[key]
+  if (Number.isFinite(Number(durationMs))) {
+    return formatDuration(durationMs)
+  }
+
+  const startedAtMs = stepStartedAt.value[key]
+  if (status === 'running' && Number.isFinite(Number(startedAtMs))) {
+    return formatDuration(nowMs.value - startedAtMs)
+  }
+
+  return ''
+}
+
+const ensureElapsedTimer = () => {
+  if (elapsedTimer) return
+  elapsedTimer = window.setInterval(() => {
+    nowMs.value = Date.now()
+  }, 500)
+}
+
+const stopElapsedTimer = () => {
+  if (!elapsedTimer) return
+  window.clearInterval(elapsedTimer)
+  elapsedTimer = null
 }
 
 const openLocalPath = async (path, mode = 'path') => {
@@ -975,6 +1048,7 @@ const workflowNodes = computed(() => commandPreviewSteps.value.map((step, index)
     status,
     statusLabel: meta.label,
     statusIcon: meta.icon,
+    elapsedLabel: getStepElapsedLabel(key, status),
   }
 }))
 
@@ -1163,10 +1237,13 @@ const ensureSocket = () => {
       } else if (data.type === 'step') {
         activeStepName.value = data.name || ''
         setStepLogPathByName(data.name, data.logPath)
+        setStepStartedByName(data.name)
         setStepStatusByName(data.name, 'running')
+        ensureElapsedTimer()
         appendLog('info', `[step] ${data.name}\n`)
       } else if (data.type === 'stepEnd') {
         setStepLogPathByName(data.name, data.logPath)
+        setStepDurationByName(data.name, data.durationMs)
         setStepStatusByName(data.name, data.exitCode === -1 ? 'stopped' : (data.exitCode === 0 ? 'success' : 'failed'))
         if (activeStepName.value === data.name) {
           activeStepName.value = ''
@@ -1191,6 +1268,7 @@ const ensureSocket = () => {
           setStepStatusByName(activeStepName.value, 'stopped')
         }
         activeStepName.value = ''
+        stopElapsedTimer()
         appendLog('info', `[end] exitCode=${data.exitCode}\n`)
         if (data.outputs?.soPath) {
           settings.soPath = data.outputs.soPath
@@ -1205,6 +1283,7 @@ const ensureSocket = () => {
     socket.onclose = () => {
       ws = null
       isRunning.value = false
+      stopElapsedTimer()
     }
   })
 }
@@ -1349,6 +1428,10 @@ onMounted(async () => {
   profileStore = readProfileStore()
   const initialProjectRoot = profileStore.activeProjectRoot || DEFAULT_PROJECT_ROOT
   await applyProjectRootChange(initialProjectRoot, { skipSaveCurrent: true })
+})
+
+onBeforeUnmount(() => {
+  stopElapsedTimer()
 })
 </script>
 
@@ -1582,6 +1665,25 @@ onMounted(async () => {
 .workflow-node-status {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.workflow-node-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workflow-node-duration {
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(0, 0, 0, 0.16);
+  color: #c9d3d8;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
 }
 
 .workflow-log-btn {

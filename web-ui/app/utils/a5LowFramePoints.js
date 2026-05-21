@@ -22,8 +22,30 @@ export const A5_LOW_FRAME_POINTS = [
   { index: 21, tag: 'pos21', label: '低帧点21', coords: [303006, 67397, 2919, 0, 360, 26] },
 ]
 
+const degreesToRadians = (degrees) => degrees * Math.PI / 180
+
+const formatVectorComponent = (value) => (
+  Math.abs(value) < 0.0000005 ? '0.000000' : value.toFixed(6)
+)
+
+export const convertA5PointRotationToForwardVector = (point) => {
+  const [, , , , pitch, yaw] = point.coords
+  const pitchRadians = degreesToRadians(pitch)
+  const yawRadians = degreesToRadians(yaw)
+  const cosPitch = Math.cos(pitchRadians)
+
+  return [
+    cosPitch * Math.cos(yawRadians),
+    cosPitch * Math.sin(yawRadians),
+    Math.sin(pitchRadians),
+  ]
+}
+
 export const buildA5LowFrameTeleportCommand = (point) => (
-  `ServerCMD TeleportAndRotateTo ${point.coords.join(' ')}`
+  `ServerCMD TeleportAndRotateTo ${[
+    ...point.coords.slice(0, 3),
+    ...convertA5PointRotationToForwardVector(point).map(formatVectorComponent),
+  ].join(' ')}`
 )
 
 export const buildA5LowFrameCaptureFrameCommand = (point) => (

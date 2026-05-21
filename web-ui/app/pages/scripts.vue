@@ -225,6 +225,40 @@
                 要求进程已启动
               </label>
             </div>
+            <section class="console-preset-page" aria-label="A5低帧点">
+              <div class="console-preset-head">
+                <div class="console-preset-title-group">
+                  <span class="console-preset-title">A5低帧点</span>
+                  <span class="console-preset-meta">21 组 · ServerCMD TeleportAndRotateTo + fa.captureframe pos[1-21]</span>
+                </div>
+                <button class="command-btn command-ghost compact" type="button" @click="copyA5LowFrameAllCommands">
+                  复制全部
+                </button>
+              </div>
+              <div class="a5-point-grid">
+                <article v-for="point in a5LowFramePoints" :key="point.tag" class="a5-point-card">
+                  <button
+                    class="a5-point-main"
+                    type="button"
+                    :title="buildA5LowFrameCaptureCommand(point)"
+                    @click="selectA5LowFramePoint(point)"
+                  >
+                    <span class="a5-point-tag">{{ point.tag }}</span>
+                    <span class="a5-point-label">{{ point.label }}</span>
+                    <span class="a5-point-coords">{{ point.coords.join(', ') }}</span>
+                  </button>
+                  <button
+                    class="a5-point-run"
+                    type="button"
+                    :disabled="isRunning"
+                    title="填入并发送"
+                    @click="runA5LowFramePoint(point)"
+                  >
+                    发送
+                  </button>
+                </article>
+              </div>
+            </section>
             <textarea
               ref="consoleTextareaEl"
               v-model="consoleCommand"
@@ -375,6 +409,10 @@
 <script setup>
 import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import { moveConsoleHistoryItem } from '~/utils/consoleHistoryOrder'
+import {
+  A5_LOW_FRAME_POINTS,
+  buildA5LowFrameCaptureCommand,
+} from '~/utils/a5LowFramePoints.js'
 
 const LEGACY_PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v1'
 const PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v2'
@@ -473,6 +511,7 @@ const consoleCommandLocalPath = ref(DEFAULT_CONSOLE_COMMAND_LOCAL_PATH)
 const consoleHistoryTagInput = ref('')
 const consoleHistory = ref([])
 const consoleCommands = ref([])
+const a5LowFramePoints = A5_LOW_FRAME_POINTS
 const consoleCommandSourcePath = ref('')
 const consoleCommandUpdatedAt = ref(0)
 const consoleCommandLoadError = ref('')
@@ -1485,6 +1524,35 @@ const copyAllTerminalText = async () => {
   appendLog(copied ? 'info' : 'stderr', copied ? '[info] 已复制全部日志。\n' : '[error] 复制全部日志失败。\n')
 }
 
+const focusConsoleCommandInput = () => {
+  nextTick(() => {
+    if (!consoleTextareaEl.value) return
+    const cursor = consoleCommand.value.length
+    consoleTextareaEl.value.focus()
+    consoleTextareaEl.value.setSelectionRange(cursor, cursor)
+    updateConsoleCursor()
+  })
+}
+
+const selectA5LowFramePoint = (point) => {
+  consoleCommand.value = buildA5LowFrameCaptureCommand(point)
+  consoleHistoryTagInput.value = `A5低帧点 ${point.tag}`
+  persistConsoleSettings()
+  focusConsoleCommandInput()
+}
+
+const runA5LowFramePoint = (point) => {
+  if (isRunning.value) return
+  selectA5LowFramePoint(point)
+  nextTick(runConsoleCommand)
+}
+
+const copyA5LowFrameAllCommands = async () => {
+  const allCommands = a5LowFramePoints.map(buildA5LowFrameCaptureCommand).join('\n')
+  const copied = await copyText(allCommands)
+  appendLog(copied ? 'info' : 'stderr', copied ? '[info] 已复制 A5低帧点 21 组命令。\n' : '[error] 复制 A5低帧点命令失败。\n', CONSOLE_LOG_KEY)
+}
+
 const openLocalPath = async (path) => {
   try {
     const res = await $fetch('/api/system/open', {
@@ -2106,8 +2174,8 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 .console-panel {
   position: relative;
   display: flex;
-  flex: 0 0 30%;
-  min-height: 180px;
+  flex: 0 0 48%;
+  min-height: 360px;
   flex-direction: column;
   gap: 12px;
   padding: 14px;
@@ -2151,8 +2219,8 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 }
 
 .console-command-input {
-  flex: 1;
-  min-height: 108px;
+  flex: 0 0 116px;
+  min-height: 116px;
   padding: 12px 14px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 8px;
@@ -2170,6 +2238,138 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 .console-command-input:focus {
   border-color: rgba(96, 205, 255, 0.55);
   box-shadow: 0 0 0 1px rgba(96, 205, 255, 0.28);
+}
+
+.console-preset-page {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(96, 205, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(7, 18, 24, 0.62);
+}
+
+.console-preset-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.console-preset-title-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.console-preset-title {
+  color: #dff6ff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.console-preset-meta {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a5-point-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
+  gap: 8px;
+  max-height: 222px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.a5-point-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.a5-point-card:hover,
+.a5-point-card:focus-within {
+  border-color: rgba(96, 205, 255, 0.32);
+  background: rgba(96, 205, 255, 0.07);
+}
+
+.a5-point-main,
+.a5-point-run {
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.a5-point-main {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 7px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.a5-point-main:hover {
+  color: var(--text-primary);
+}
+
+.a5-point-tag {
+  color: #9de5ff;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.a5-point-label {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a5-point-coords {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a5-point-run {
+  min-width: 46px;
+  padding: 0 9px;
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  color: #d8ffd2;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(108, 203, 95, 0.1);
+}
+
+.a5-point-run:hover:not(:disabled) {
+  color: #f0ffed;
+  background: rgba(108, 203, 95, 0.18);
+}
+
+.a5-point-run:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
 }
 
 .console-tag-row {

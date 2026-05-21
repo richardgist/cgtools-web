@@ -237,24 +237,56 @@
               </div>
               <div class="a5-point-grid">
                 <article v-for="point in a5LowFramePoints" :key="point.tag" class="a5-point-card">
-                  <button
-                    class="a5-point-main"
-                    type="button"
-                    :title="buildA5LowFrameCaptureCommand(point)"
-                    @click="selectA5LowFramePoint(point)"
-                  >
+                  <div class="a5-point-head">
                     <span class="a5-point-tag">{{ point.tag }}</span>
                     <span class="a5-point-label">{{ point.label }}</span>
                     <span class="a5-point-coords">{{ point.coords.join(', ') }}</span>
-                  </button>
+                  </div>
+                  <div class="a5-command-box">
+                    <button
+                      class="a5-command-text"
+                      type="button"
+                      :title="buildA5LowFrameTeleportCommand(point)"
+                      @click="selectA5LowFrameCommand(point, 'teleport')"
+                    >
+                      {{ buildA5LowFrameTeleportCommand(point) }}
+                    </button>
+                    <button
+                      class="a5-command-run"
+                      type="button"
+                      :disabled="isRunning"
+                      title="只发送传送命令"
+                      @click="runA5LowFrameCommand(point, 'teleport')"
+                    >
+                      传送
+                    </button>
+                  </div>
+                  <div class="a5-command-box">
+                    <button
+                      class="a5-command-text"
+                      type="button"
+                      :title="buildA5LowFrameCaptureFrameCommand(point)"
+                      @click="selectA5LowFrameCommand(point, 'capture')"
+                    >
+                      {{ buildA5LowFrameCaptureFrameCommand(point) }}
+                    </button>
+                    <button
+                      class="a5-command-run capture"
+                      type="button"
+                      :disabled="isRunning"
+                      title="只发送抓帧命令"
+                      @click="runA5LowFrameCommand(point, 'capture')"
+                    >
+                      抓帧
+                    </button>
+                  </div>
                   <button
-                    class="a5-point-run"
+                    class="a5-point-copy"
                     type="button"
-                    :disabled="isRunning"
-                    title="填入并发送"
-                    @click="runA5LowFramePoint(point)"
+                    title="填入两行命令，手动分开发送"
+                    @click="selectA5LowFrameCommand(point, 'both')"
                   >
-                    发送
+                    填入两行
                   </button>
                 </article>
               </div>
@@ -412,6 +444,8 @@ import { moveConsoleHistoryItem } from '~/utils/consoleHistoryOrder'
 import {
   A5_LOW_FRAME_POINTS,
   buildA5LowFrameCaptureCommand,
+  buildA5LowFrameCaptureFrameCommand,
+  buildA5LowFrameTeleportCommand,
 } from '~/utils/a5LowFramePoints.js'
 
 const LEGACY_PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v1'
@@ -1534,16 +1568,23 @@ const focusConsoleCommandInput = () => {
   })
 }
 
-const selectA5LowFramePoint = (point) => {
-  consoleCommand.value = buildA5LowFrameCaptureCommand(point)
-  consoleHistoryTagInput.value = `A5低帧点 ${point.tag}`
+const getA5LowFrameCommandText = (point, commandKind) => {
+  if (commandKind === 'teleport') return buildA5LowFrameTeleportCommand(point)
+  if (commandKind === 'capture') return buildA5LowFrameCaptureFrameCommand(point)
+  return buildA5LowFrameCaptureCommand(point)
+}
+
+const selectA5LowFrameCommand = (point, commandKind) => {
+  consoleCommand.value = getA5LowFrameCommandText(point, commandKind)
+  const commandTag = commandKind === 'teleport' ? '传送' : commandKind === 'capture' ? '抓帧' : '两行'
+  consoleHistoryTagInput.value = `A5低帧点 ${point.tag} ${commandTag}`
   persistConsoleSettings()
   focusConsoleCommandInput()
 }
 
-const runA5LowFramePoint = (point) => {
+const runA5LowFrameCommand = (point, commandKind) => {
   if (isRunning.value) return
-  selectA5LowFramePoint(point)
+  selectA5LowFrameCommand(point, commandKind)
   nextTick(runConsoleCommand)
 }
 
@@ -2282,18 +2323,20 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 
 .a5-point-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 8px;
-  max-height: 222px;
+  max-height: 340px;
   overflow: auto;
   padding-right: 2px;
 }
 
 .a5-point-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   min-width: 0;
+  flex-direction: column;
+  gap: 7px;
   overflow: hidden;
+  padding: 9px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
@@ -2305,25 +2348,11 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   background: rgba(96, 205, 255, 0.07);
 }
 
-.a5-point-main,
-.a5-point-run {
-  border: 0;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.a5-point-main {
+.a5-point-head {
   display: grid;
   min-width: 0;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 2px 7px;
-  padding: 9px 10px;
-  text-align: left;
-}
-
-.a5-point-main:hover {
-  color: var(--text-primary);
 }
 
 .a5-point-tag {
@@ -2352,9 +2381,44 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   white-space: nowrap;
 }
 
-.a5-point-run {
-  min-width: 46px;
-  padding: 0 9px;
+.a5-command-box {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.a5-command-text,
+.a5-command-run,
+.a5-point-copy {
+  border: 0;
+  cursor: pointer;
+}
+
+.a5-command-text {
+  overflow: hidden;
+  min-width: 0;
+  padding: 8px 9px;
+  color: #d8e7ed;
+  background: transparent;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a5-command-text:hover {
+  color: #ffffff;
+  background: rgba(96, 205, 255, 0.08);
+}
+
+.a5-command-run {
+  padding: 0 8px;
   border-left: 1px solid rgba(255, 255, 255, 0.07);
   color: #d8ffd2;
   font-size: 11px;
@@ -2362,14 +2426,41 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   background: rgba(108, 203, 95, 0.1);
 }
 
-.a5-point-run:hover:not(:disabled) {
+.a5-command-run.capture {
+  color: #dff6ff;
+  background: rgba(96, 205, 255, 0.1);
+}
+
+.a5-command-run:hover:not(:disabled) {
   color: #f0ffed;
   background: rgba(108, 203, 95, 0.18);
 }
 
-.a5-point-run:disabled {
+.a5-command-run.capture:hover:not(:disabled) {
+  color: #ffffff;
+  background: rgba(96, 205, 255, 0.18);
+}
+
+.a5-command-run:disabled {
   cursor: not-allowed;
   opacity: 0.44;
+}
+
+.a5-point-copy {
+  align-self: flex-start;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.a5-point-copy:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.075);
 }
 
 .console-tag-row {

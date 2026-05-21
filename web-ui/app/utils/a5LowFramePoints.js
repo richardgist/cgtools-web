@@ -26,7 +26,11 @@ export const buildA5LowFrameTeleportCommand = (point) => (
   `ServerCMD TeleportAndRotateTo ${point.coords.join(' ')}`
 )
 
+export const buildA5LowFrameCaptureFrameCommand = (point) => (
+  `fa.captureframe ${point.tag}`
+)
+
 export const buildA5LowFrameCaptureCommand = (point) => [
   buildA5LowFrameTeleportCommand(point),
-  `fa.captureframe ${point.tag}`,
+  buildA5LowFrameCaptureFrameCommand(point),
 ].join('\n')

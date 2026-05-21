@@ -3,9 +3,23 @@ import assert from 'node:assert/strict'
 const {
   A5_LOW_FRAME_POINTS,
   buildA5LowFrameCaptureCommand,
+  buildA5LowFrameCaptureFrameCommand,
+  buildA5LowFrameTeleportCommand,
 } = await import('../a5LowFramePoints.js')
 
 assert.equal(A5_LOW_FRAME_POINTS.length, 21, 'A5 low-frame preset should contain all 21 points')
+
+assert.equal(
+  buildA5LowFrameTeleportCommand(A5_LOW_FRAME_POINTS[0]),
+  'ServerCMD TeleportAndRotateTo 164727 91180 1905 0 6 5',
+  'pos1 should expose teleport as an independent command',
+)
+
+assert.equal(
+  buildA5LowFrameCaptureFrameCommand(A5_LOW_FRAME_POINTS[0]),
+  'fa.captureframe pos1',
+  'pos1 should expose capture as an independent command',
+)
 
 assert.equal(
   buildA5LowFrameCaptureCommand(A5_LOW_FRAME_POINTS[0]),
@@ -36,5 +50,7 @@ assert.equal(
 
 for (const [index, point] of A5_LOW_FRAME_POINTS.entries()) {
   assert.equal(point.tag, `pos${index + 1}`)
+  assert.match(buildA5LowFrameTeleportCommand(point), /^ServerCMD TeleportAndRotateTo /)
+  assert.equal(buildA5LowFrameCaptureFrameCommand(point), `fa.captureframe pos${index + 1}`)
   assert.match(buildA5LowFrameCaptureCommand(point), /^ServerCMD TeleportAndRotateTo .+\nfa\.captureframe pos\d+$/)
 }

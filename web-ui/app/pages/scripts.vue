@@ -225,14 +225,64 @@
                 要求进程已启动
               </label>
             </div>
-            <section class="console-preset-page" aria-label="A5低帧点">
+            <div class="console-tool-tabs" role="tablist" aria-label="Console 工具">
+              <button
+                class="console-tool-tab"
+                :class="{ active: consoleToolTab === 'manual' }"
+                type="button"
+                role="tab"
+                :aria-selected="consoleToolTab === 'manual'"
+                @click="consoleToolTab = 'manual'"
+              >
+                手动命令
+              </button>
+              <button
+                class="console-tool-tab"
+                :class="{ active: consoleToolTab === 'map-points' }"
+                type="button"
+                role="tab"
+                :aria-selected="consoleToolTab === 'map-points'"
+                @click="consoleToolTab = 'map-points'"
+              >
+                地图点位
+              </button>
+            </div>
+            <section v-if="consoleToolTab === 'manual'" class="console-manual-panel" aria-label="手动 Console 命令">
+              <textarea
+                ref="consoleTextareaEl"
+                v-model="consoleCommand"
+                class="console-command-input"
+                spellcheck="false"
+                placeholder="输入要发送到游戏的 UE console command。支持一行一条，或用分号分隔多条命令。"
+                :disabled="isRunning"
+                @input="updateConsoleCursor"
+                @click="updateConsoleCursor"
+                @keyup="updateConsoleCursor"
+                @keydown="handleConsoleCommandKeydown"
+              ></textarea>
+            </section>
+            <section v-if="consoleToolTab === 'map-points'" class="console-preset-page" aria-label="地图点位">
               <div class="console-preset-head">
                 <div class="console-preset-title-group">
-                  <span class="console-preset-title">A5低帧点</span>
-                  <span class="console-preset-meta">21 组 · ServerCMD TeleportAndRotateTo + fa.captureframe pos[1-21]</span>
+                  <span class="console-preset-title">{{ selectedConsoleMapPointPreset.label }}</span>
+                  <span class="console-preset-meta">{{ selectedConsoleMapPointPreset.meta }}</span>
                 </div>
                 <button class="command-btn command-ghost compact" type="button" @click="copyA5LowFrameAllCommands">
                   复制全部
+                </button>
+              </div>
+              <div class="console-map-preset-tabs" role="tablist" aria-label="地图点位分类">
+                <button
+                  v-for="preset in consoleMapPointPresets"
+                  :key="preset.id"
+                  class="console-map-preset-tab"
+                  :class="{ active: selectedConsoleMapPointPreset.id === preset.id }"
+                  type="button"
+                  role="tab"
+                  :aria-selected="selectedConsoleMapPointPreset.id === preset.id"
+                  @click="selectConsoleMapPointPreset(preset)"
+                >
+                  {{ preset.label }}
                 </button>
               </div>
               <div class="a5-point-grid">
@@ -292,21 +342,6 @@
                 </div>
               </section>
             </section>
-            <details class="console-manual-details">
-              <summary>手动 Console 命令</summary>
-              <textarea
-              ref="consoleTextareaEl"
-              v-model="consoleCommand"
-              class="console-command-input"
-              spellcheck="false"
-              placeholder="输入要发送到游戏的 UE console command。支持一行一条，或用分号分隔多条命令。"
-              :disabled="isRunning"
-              @input="updateConsoleCursor"
-              @click="updateConsoleCursor"
-              @keyup="updateConsoleCursor"
-              @keydown="handleConsoleCommandKeydown"
-              ></textarea>
-            </details>
             <div class="console-tag-row">
               <label>备注标签</label>
               <input
@@ -318,7 +353,7 @@
               />
               <span class="console-tag-hint">收录后会显示在左侧历史命令上</span>
             </div>
-            <div v-if="consoleSuggestions.length" class="console-suggestion-popover">
+            <div v-if="consoleToolTab === 'manual' && consoleSuggestions.length" class="console-suggestion-popover">
               <button
                 v-for="(suggestion, index) in consoleSuggestions"
                 :key="suggestion.name"
@@ -549,7 +584,16 @@ const consoleCommandLocalPath = ref(DEFAULT_CONSOLE_COMMAND_LOCAL_PATH)
 const consoleHistoryTagInput = ref('')
 const consoleHistory = ref([])
 const consoleCommands = ref([])
-const a5LowFramePoints = A5_LOW_FRAME_POINTS
+const consoleToolTab = ref('manual')
+const consoleMapPointPresets = [
+  {
+    id: 'a5-low-frame',
+    label: 'A5低帧点',
+    meta: '21 组 · ServerCMD TeleportAndRotateTo + fa.captureframe pos[1-21]',
+    points: A5_LOW_FRAME_POINTS,
+  },
+]
+const selectedConsoleMapPointPresetId = ref(consoleMapPointPresets[0].id)
 const selectedA5LowFramePoint = ref(A5_LOW_FRAME_POINTS[0])
 const consoleCommandSourcePath = ref('')
 const consoleCommandUpdatedAt = ref(0)
@@ -744,6 +788,11 @@ const isCurrentConsoleCommandCollected = computed(() => {
 const currentConsoleHistoryActionText = computed(() => (
   isCurrentConsoleCommandCollected.value ? '更新收录' : '收录命令'
 ))
+const selectedConsoleMapPointPreset = computed(() => (
+  consoleMapPointPresets.find((preset) => preset.id === selectedConsoleMapPointPresetId.value)
+  || consoleMapPointPresets[0]
+))
+const a5LowFramePoints = computed(() => selectedConsoleMapPointPreset.value.points)
 const selectedA5TeleportCommand = computed(() => buildA5LowFrameTeleportCommand(selectedA5LowFramePoint.value))
 const selectedA5CaptureFrameCommand = computed(() => buildA5LowFrameCaptureFrameCommand(selectedA5LowFramePoint.value))
 const consoleHistoryGroups = computed(() => {
@@ -1569,6 +1618,13 @@ const selectA5LowFramePoint = (point) => {
   selectedA5LowFramePoint.value = point
 }
 
+const selectConsoleMapPointPreset = (preset) => {
+  selectedConsoleMapPointPresetId.value = preset.id
+  if (!preset.points.some((point) => point.tag === selectedA5LowFramePoint.value?.tag)) {
+    selectedA5LowFramePoint.value = preset.points[0]
+  }
+}
+
 const applyA5LowFrameCommandToConsole = (commandKind) => {
   const point = selectedA5LowFramePoint.value
   const commandText = commandKind === 'teleport'
@@ -1576,7 +1632,7 @@ const applyA5LowFrameCommandToConsole = (commandKind) => {
     : selectedA5CaptureFrameCommand.value
   const commandTag = commandKind === 'teleport' ? '传送' : '抓帧'
   consoleCommand.value = commandText
-  consoleHistoryTagInput.value = `A5低帧点 ${point.tag} ${commandTag}`
+  consoleHistoryTagInput.value = `${selectedConsoleMapPointPreset.value.label} ${point.tag} ${commandTag}`
   persistConsoleSettings()
 }
 
@@ -1587,9 +1643,10 @@ const runA5LowFrameSelectedCommand = (commandKind) => {
 }
 
 const copyA5LowFrameAllCommands = async () => {
-  const allCommands = a5LowFramePoints.map(buildA5LowFrameCaptureCommand).join('\n')
+  const preset = selectedConsoleMapPointPreset.value
+  const allCommands = preset.points.map(buildA5LowFrameCaptureCommand).join('\n')
   const copied = await copyText(allCommands)
-  appendLog(copied ? 'info' : 'stderr', copied ? '[info] 已复制 A5低帧点 21 组命令。\n' : '[error] 复制 A5低帧点命令失败。\n', CONSOLE_LOG_KEY)
+  appendLog(copied ? 'info' : 'stderr', copied ? `[info] 已复制 ${preset.label} ${preset.points.length} 组命令。\n` : `[error] 复制 ${preset.label} 命令失败。\n`, CONSOLE_LOG_KEY)
 }
 
 const openLocalPath = async (path) => {
@@ -2279,6 +2336,46 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   box-shadow: 0 0 0 1px rgba(96, 205, 255, 0.28);
 }
 
+.console-tool-tabs,
+.console-map-preset-tabs {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.console-tool-tab,
+.console-map-preset-tab {
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 12px;
+  color: var(--text-tertiary);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.console-tool-tab:hover,
+.console-tool-tab.active,
+.console-map-preset-tab:hover,
+.console-map-preset-tab.active {
+  color: #101217;
+  background: #9f7cff;
+}
+
+.console-manual-panel {
+  min-height: 0;
+}
+
+.console-manual-panel .console-command-input {
+  width: 100%;
+}
+
 .console-preset-page {
   display: flex;
   min-height: 0;
@@ -2295,6 +2392,11 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.console-map-preset-tabs {
+  width: 100%;
+  overflow-x: auto;
 }
 
 .console-preset-title-group {
@@ -2483,28 +2585,6 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 .a5-command-run:disabled {
   cursor: not-allowed;
   opacity: 0.44;
-}
-
-.console-manual-details {
-  border-bottom: 1px solid var(--divider);
-  background: rgba(255, 255, 255, 0.01);
-}
-
-.console-manual-details summary {
-  padding: 8px 14px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.console-manual-details[open] summary {
-  color: var(--text-secondary);
-}
-
-.console-manual-details .console-command-input {
-  width: calc(100% - 28px);
-  margin: 0 14px 12px;
 }
 
 .console-tag-row {

@@ -7,13 +7,27 @@ const scriptsPage = fs.readFileSync(
   'utf8',
 )
 
-const presetStart = scriptsPage.indexOf('aria-label="A5低帧点"')
-assert(presetStart >= 0, 'A5 low-frame preset section should exist')
+assert.match(scriptsPage, /const consoleToolTab = ref\('manual'\)/)
+assert.match(scriptsPage, /consoleToolTab === 'manual'/)
+assert.match(scriptsPage, /consoleToolTab === 'map-points'/)
+assert.match(scriptsPage, /手动命令/)
+assert.match(scriptsPage, /地图点位/)
+
+const manualStart = scriptsPage.indexOf('aria-label="手动 Console 命令"')
+assert(manualStart >= 0, 'manual console command panel should be the default tab content')
+
+const mapGateStart = scriptsPage.indexOf('v-if="consoleToolTab === \'map-points\'"')
+assert(mapGateStart >= 0, 'map-point preset section should be gated by the map-points tab')
+
+const presetStart = scriptsPage.indexOf('class="console-preset-page"', mapGateStart)
+assert(presetStart > mapGateStart, 'A5 low-frame preset section should render only inside the map-points tab')
 
 const presetEnd = scriptsPage.indexOf('</section>', scriptsPage.indexOf('class="a5-selected-panel"', presetStart))
 const presetBlock = scriptsPage.slice(presetStart, presetEnd)
 
 assert.match(presetBlock, /class="a5-selected-panel"/)
+assert.match(presetBlock, /selectedConsoleMapPointPreset\.label/)
+assert.match(presetBlock, /selectedConsoleMapPointPreset\.meta/)
 assert.match(presetBlock, /传送命令/)
 assert.match(presetBlock, /抓帧命令/)
 assert.match(presetBlock, /selectedA5TeleportCommand/)
@@ -22,6 +36,4 @@ assert.match(presetBlock, /runA5LowFrameSelectedCommand\('teleport'\)/)
 assert.match(presetBlock, /runA5LowFrameSelectedCommand\('capture'\)/)
 assert.doesNotMatch(presetBlock, /class="a5-command-box"/)
 assert.doesNotMatch(presetBlock, /class="a5-point-copy"/)
-
-const manualStart = scriptsPage.indexOf('class="console-manual-details"')
-assert(manualStart > presetStart, 'manual console input should be below the A5 dedicated panel')
+assert(manualStart < mapGateStart, 'manual console input should remain separate from map-point presets')

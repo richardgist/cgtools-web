@@ -264,28 +264,69 @@
             <section v-if="consoleToolTab === 'map-points'" class="console-preset-page" aria-label="地图点位">
               <div class="console-preset-head">
                 <div class="console-preset-title-group">
-                  <span class="console-preset-title">{{ selectedConsoleMapPointPreset.label }}</span>
-                  <span class="console-preset-meta">{{ selectedConsoleMapPointPreset.meta }}</span>
+                  <span class="console-preset-title">地图点位</span>
+                  <span class="console-preset-meta">{{ selectedConsoleMapPointPreset.label }} · {{ selectedConsoleMapPointPreset.meta }}</span>
                 </div>
                 <button class="command-btn command-ghost compact" type="button" @click="copyA5LowFrameAllCommands">
                   复制全部
                 </button>
               </div>
-              <div class="console-map-preset-tabs" role="tablist" aria-label="地图点位分类">
+              <div class="console-map-manager">
+                <label>
+                  <span>当前地图</span>
+                  <select v-model="selectedConsoleMapPointPresetId" class="fluent-input console-map-select" @change="ensureSelectedMapPointPreset">
+                    <option v-for="preset in consoleMapPointPresets" :key="preset.id" :value="preset.id">
+                      {{ preset.label }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>新地图名</span>
+                  <input
+                    v-model="mapPointNewMapName"
+                    class="fluent-input console-map-name-input"
+                    placeholder="例如 A6低帧点"
+                    @keydown.enter.prevent="addConsoleMapPointPreset"
+                  />
+                </label>
+                <button class="command-btn command-save compact" type="button" @click="addConsoleMapPointPreset">新增地图</button>
                 <button
-                  v-for="preset in consoleMapPointPresets"
-                  :key="preset.id"
-                  class="console-map-preset-tab"
-                  :class="{ active: selectedConsoleMapPointPreset.id === preset.id }"
+                  class="command-btn command-danger compact"
                   type="button"
-                  role="tab"
-                  :aria-selected="selectedConsoleMapPointPreset.id === preset.id"
-                  @click="selectConsoleMapPointPreset(preset)"
+                  :disabled="consoleMapPointPresets.length <= 1"
+                  @click="deleteSelectedConsoleMapPointPreset"
                 >
-                  {{ preset.label }}
+                  删除地图
                 </button>
               </div>
+              <details class="console-map-import-details">
+                <summary>批量导入 / 更新点位</summary>
+                <div class="console-map-importer">
+                  <label>
+                    <span>批量 Pointdata</span>
+                    <textarea
+                      v-model="mapPointImportText"
+                      class="console-map-import-input"
+                      rows="4"
+                      placeholder="#1:低帧点&#10;# Pointdata = &quot;164727,91180,1905,0,6,5&quot;"
+                    ></textarea>
+                  </label>
+                  <div class="console-map-import-actions">
+                    <input
+                      v-model="mapPointImportMapName"
+                      class="fluent-input console-map-name-input"
+                      placeholder="生成新地图时填写地图名"
+                    />
+                    <button class="command-btn command-save compact" type="button" @click="updateSelectedConsoleMapPointPresetFromText">更新当前地图</button>
+                    <button class="command-btn command-primary compact" type="button" @click="createConsoleMapPointPresetFromText">生成新地图</button>
+                    <span v-if="mapPointImportError" class="console-map-error">{{ mapPointImportError }}</span>
+                  </div>
+                </div>
+              </details>
               <div class="a5-point-grid">
+                <div v-if="!a5LowFramePoints.length" class="a5-point-empty">
+                  当前地图还没有点位，展开“批量导入 / 更新点位”粘贴 Pointdata 后更新当前地图。
+                </div>
                 <article v-for="point in a5LowFramePoints" :key="point.tag" class="a5-point-card">
                   <button
                     class="a5-point-head"
@@ -299,7 +340,7 @@
                   </button>
                 </article>
               </div>
-              <section class="a5-selected-panel">
+              <section v-if="selectedA5LowFramePoint" class="a5-selected-panel">
                 <div class="a5-selected-title">
                   <span>{{ selectedA5LowFramePoint.tag }} {{ selectedA5LowFramePoint.label }}</span>
                   <span>{{ selectedA5LowFramePoint.coords.join(', ') }}</span>
@@ -481,17 +522,23 @@
 import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import { moveConsoleHistoryItem } from '~/utils/consoleHistoryOrder'
 import {
-  A5_LOW_FRAME_POINTS,
   buildA5LowFrameCaptureCommand,
   buildA5LowFrameCaptureFrameCommand,
   buildA5LowFrameTeleportCommand,
 } from '~/utils/a5LowFramePoints.js'
+import {
+  DEFAULT_CONSOLE_MAP_POINT_PRESET_ID,
+  createDefaultConsoleMapPointPresets,
+  normalizeConsoleMapPointPresets,
+  parseConsoleMapPointText,
+} from '~/utils/consoleMapPointPresets.js'
 
 const LEGACY_PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v1'
 const PARAM_STORAGE_KEY = 'cgtools_script_runner_params_v2'
 const MODE_STORAGE_KEY = 'cgtools_script_runner_mode_v1'
 const CONSOLE_SETTINGS_STORAGE_KEY = 'cgtools_console_runner_settings_v1'
 const CONSOLE_HISTORY_STORAGE_KEY = 'cgtools_console_runner_history_v1'
+const CONSOLE_MAP_POINT_PRESETS_STORAGE_KEY = 'cgtools_console_map_point_presets_v1'
 const CONSOLE_LOG_KEY = '__console__'
 const CONSOLE_HISTORY_LIMIT = 36
 const CONSOLE_HISTORY_TAG_LIMIT = 8
@@ -585,16 +632,13 @@ const consoleHistoryTagInput = ref('')
 const consoleHistory = ref([])
 const consoleCommands = ref([])
 const consoleToolTab = ref('manual')
-const consoleMapPointPresets = [
-  {
-    id: 'a5-low-frame',
-    label: 'A5低帧点',
-    meta: '21 组 · ServerCMD TeleportAndRotateTo + fa.captureframe pos[1-21]',
-    points: A5_LOW_FRAME_POINTS,
-  },
-]
-const selectedConsoleMapPointPresetId = ref(consoleMapPointPresets[0].id)
-const selectedA5LowFramePoint = ref(A5_LOW_FRAME_POINTS[0])
+const consoleMapPointPresets = ref(createDefaultConsoleMapPointPresets())
+const selectedConsoleMapPointPresetId = ref(DEFAULT_CONSOLE_MAP_POINT_PRESET_ID)
+const selectedA5LowFramePoint = ref(consoleMapPointPresets.value[0].points[0])
+const mapPointNewMapName = ref('')
+const mapPointImportText = ref('')
+const mapPointImportMapName = ref('')
+const mapPointImportError = ref('')
 const consoleCommandSourcePath = ref('')
 const consoleCommandUpdatedAt = ref(0)
 const consoleCommandLoadError = ref('')
@@ -789,12 +833,16 @@ const currentConsoleHistoryActionText = computed(() => (
   isCurrentConsoleCommandCollected.value ? '更新收录' : '收录命令'
 ))
 const selectedConsoleMapPointPreset = computed(() => (
-  consoleMapPointPresets.find((preset) => preset.id === selectedConsoleMapPointPresetId.value)
-  || consoleMapPointPresets[0]
+  consoleMapPointPresets.value.find((preset) => preset.id === selectedConsoleMapPointPresetId.value)
+  || consoleMapPointPresets.value[0]
 ))
 const a5LowFramePoints = computed(() => selectedConsoleMapPointPreset.value.points)
-const selectedA5TeleportCommand = computed(() => buildA5LowFrameTeleportCommand(selectedA5LowFramePoint.value))
-const selectedA5CaptureFrameCommand = computed(() => buildA5LowFrameCaptureFrameCommand(selectedA5LowFramePoint.value))
+const selectedA5TeleportCommand = computed(() => (
+  selectedA5LowFramePoint.value ? buildA5LowFrameTeleportCommand(selectedA5LowFramePoint.value) : ''
+))
+const selectedA5CaptureFrameCommand = computed(() => (
+  selectedA5LowFramePoint.value ? buildA5LowFrameCaptureFrameCommand(selectedA5LowFramePoint.value) : ''
+))
 const consoleHistoryGroups = computed(() => {
   const groups = []
   let currentGroup = null
@@ -960,6 +1008,33 @@ const persistConsoleSettings = () => {
     historyTags: consoleHistoryTagInput.value,
     commandLocalPath: consoleCommandLocalPath.value,
   }))
+}
+
+const ensureSelectedMapPointPreset = () => {
+  const preset = selectedConsoleMapPointPreset.value
+  selectedConsoleMapPointPresetId.value = preset.id
+  if (!preset.points.length) {
+    selectedA5LowFramePoint.value = null
+    return
+  }
+  if (!preset.points.some((point) => point.tag === selectedA5LowFramePoint.value?.tag)) {
+    selectedA5LowFramePoint.value = preset.points[0]
+  }
+}
+
+const persistConsoleMapPointPresets = () => {
+  localStorage.setItem(CONSOLE_MAP_POINT_PRESETS_STORAGE_KEY, JSON.stringify(consoleMapPointPresets.value))
+}
+
+const loadConsoleMapPointPresets = () => {
+  try {
+    const rawPresets = localStorage.getItem(CONSOLE_MAP_POINT_PRESETS_STORAGE_KEY)
+    consoleMapPointPresets.value = normalizeConsoleMapPointPresets(rawPresets ? JSON.parse(rawPresets) : null)
+  } catch {
+    consoleMapPointPresets.value = createDefaultConsoleMapPointPresets()
+  }
+  ensureSelectedMapPointPreset()
+  persistConsoleMapPointPresets()
 }
 
 const persistConsoleHistory = () => {
@@ -1625,8 +1700,91 @@ const selectConsoleMapPointPreset = (preset) => {
   }
 }
 
+const buildConsoleMapPointPreset = (label, points) => ({
+  id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  label,
+  meta: `${points.length} 组 · ServerCMD TeleportAndRotateTo + fa.captureframe`,
+  points,
+})
+
+const addConsoleMapPointPreset = () => {
+  const label = mapPointNewMapName.value.trim()
+  if (!label) {
+    mapPointImportError.value = '请输入地图名。'
+    return
+  }
+
+  const preset = buildConsoleMapPointPreset(label, [])
+  consoleMapPointPresets.value = normalizeConsoleMapPointPresets([...consoleMapPointPresets.value, preset])
+  selectedConsoleMapPointPresetId.value = preset.id
+  selectedA5LowFramePoint.value = null
+  mapPointNewMapName.value = ''
+  mapPointImportError.value = ''
+  persistConsoleMapPointPresets()
+}
+
+const deleteSelectedConsoleMapPointPreset = () => {
+  if (consoleMapPointPresets.value.length <= 1) {
+    mapPointImportError.value = '至少保留一个地图。'
+    return
+  }
+
+  const currentId = selectedConsoleMapPointPreset.value.id
+  consoleMapPointPresets.value = consoleMapPointPresets.value.filter((preset) => preset.id !== currentId)
+  selectedConsoleMapPointPresetId.value = consoleMapPointPresets.value[0].id
+  selectedA5LowFramePoint.value = consoleMapPointPresets.value[0].points[0] || null
+  mapPointImportError.value = ''
+  persistConsoleMapPointPresets()
+}
+
+const updateSelectedConsoleMapPointPresetFromText = () => {
+  const points = parseConsoleMapPointText(mapPointImportText.value)
+  if (!points.length) {
+    mapPointImportError.value = '没有解析到 Pointdata。'
+    return
+  }
+
+  const currentId = selectedConsoleMapPointPreset.value.id
+  consoleMapPointPresets.value = consoleMapPointPresets.value.map((preset) => (
+    preset.id === currentId
+      ? {
+          ...preset,
+          meta: `${points.length} 组 · ServerCMD TeleportAndRotateTo + fa.captureframe`,
+          points,
+        }
+      : preset
+  ))
+  selectedA5LowFramePoint.value = points[0]
+  mapPointImportError.value = ''
+  persistConsoleMapPointPresets()
+}
+
+const createConsoleMapPointPresetFromText = () => {
+  const label = mapPointImportMapName.value.trim() || mapPointNewMapName.value.trim()
+  if (!label) {
+    mapPointImportError.value = '请输入新地图名。'
+    return
+  }
+
+  const points = parseConsoleMapPointText(mapPointImportText.value)
+  if (!points.length) {
+    mapPointImportError.value = '没有解析到 Pointdata。'
+    return
+  }
+
+  const preset = buildConsoleMapPointPreset(label, points)
+  consoleMapPointPresets.value = normalizeConsoleMapPointPresets([...consoleMapPointPresets.value, preset])
+  selectedConsoleMapPointPresetId.value = preset.id
+  selectedA5LowFramePoint.value = preset.points[0]
+  mapPointImportMapName.value = ''
+  mapPointNewMapName.value = ''
+  mapPointImportError.value = ''
+  persistConsoleMapPointPresets()
+}
+
 const applyA5LowFrameCommandToConsole = (commandKind) => {
   const point = selectedA5LowFramePoint.value
+  if (!point) return
   const commandText = commandKind === 'teleport'
     ? selectedA5TeleportCommand.value
     : selectedA5CaptureFrameCommand.value
@@ -1644,6 +1802,10 @@ const runA5LowFrameSelectedCommand = (commandKind) => {
 
 const copyA5LowFrameAllCommands = async () => {
   const preset = selectedConsoleMapPointPreset.value
+  if (!preset.points.length) {
+    appendLog('stderr', `[error] ${preset.label} 还没有点位。\n`, CONSOLE_LOG_KEY)
+    return
+  }
   const allCommands = preset.points.map(buildA5LowFrameCaptureCommand).join('\n')
   const copied = await copyText(allCommands)
   appendLog(copied ? 'info' : 'stderr', copied ? `[info] 已复制 ${preset.label} ${preset.points.length} 组命令。\n` : `[error] 复制 ${preset.label} 命令失败。\n`, CONSOLE_LOG_KEY)
@@ -1780,6 +1942,7 @@ const stopScript = async () => {
 onMounted(() => {
   loadParamStore()
   loadConsoleState()
+  loadConsoleMapPointPresets()
   loadConsoleCommands()
   loadScripts()
 })
@@ -1805,7 +1968,8 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 /* Page-specific overrides for scripts if needed */
 .page-grid {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  min-width: 0;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 24px;
   height: calc(100vh - 150px);
 }
@@ -2125,6 +2289,7 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 }
 
 .terminal-panel {
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -2270,10 +2435,14 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 .console-panel {
   position: relative;
   display: flex;
-  flex: 0 0 48%;
+  flex: 0 0 auto;
+  min-width: 0;
   min-height: 360px;
+  max-height: 70vh;
   flex-direction: column;
   gap: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 14px;
   border-bottom: 1px solid var(--divider);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.006));
@@ -2281,7 +2450,8 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 
 .console-row {
   display: grid;
-  grid-template-columns: auto minmax(260px, 1fr) auto minmax(220px, 0.8fr) auto;
+  min-width: 0;
+  grid-template-columns: auto minmax(180px, 1fr) auto minmax(160px, 0.72fr) auto;
   gap: 10px;
   align-items: center;
 }
@@ -2378,9 +2548,11 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 
 .console-preset-page {
   display: flex;
+  width: 100%;
   min-height: 0;
   flex-direction: column;
   gap: 10px;
+  overflow: visible;
   padding: 12px;
   border: 1px solid rgba(96, 205, 255, 0.12);
   border-radius: 8px;
@@ -2397,6 +2569,82 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 .console-map-preset-tabs {
   width: 100%;
   overflow-x: auto;
+}
+
+.console-map-manager {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.8fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.console-map-manager label,
+.console-map-importer label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.console-map-select,
+.console-map-name-input {
+  min-width: 0;
+}
+
+.console-map-import-details {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.console-map-import-details summary {
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.console-map-importer {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.6fr);
+  gap: 8px;
+  align-items: stretch;
+  padding: 0 10px 10px;
+}
+
+.console-map-import-input {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  outline: none;
+  resize: vertical;
+  color: #d8e7ed;
+  background: #101010;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.console-map-import-actions {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.console-map-error {
+  overflow: hidden;
+  color: #ffb4bd;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .console-preset-title-group {
@@ -2423,9 +2671,11 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 
 .a5-point-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  flex: 0 0 auto;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
-  max-height: 216px;
+  min-height: 96px;
+  max-height: 150px;
   overflow: auto;
   padding-right: 2px;
 }
@@ -2436,6 +2686,21 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.a5-point-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border: 1px dashed rgba(96, 205, 255, 0.22);
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 12px;
+  text-align: center;
 }
 
 .a5-point-card:hover,
@@ -2863,7 +3128,10 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
   .script-param-project-row,
   .script-param-row,
   .console-row,
-  .console-tag-row {
+  .console-tag-row,
+  .console-map-manager,
+  .console-map-importer,
+  .a5-selected-command {
     grid-template-columns: 1fr;
   }
 

@@ -5,6 +5,8 @@ import { listManagedScripts } from '../scriptRegistry.ts'
 
 const statsPullScriptName = 'pull_latest_stats.ps1'
 const statsPullScriptPath = path.resolve(process.cwd(), '../scripts', statsPullScriptName)
+const gameLogsPullScriptName = 'pull_game_logs.ps1'
+const gameLogsPullScriptPath = path.resolve(process.cwd(), '../scripts', gameLogsPullScriptName)
 const savedPullScriptName = 'pull_saved_dir.ps1'
 const savedPullScriptPath = path.resolve(process.cwd(), '../scripts', savedPullScriptName)
 const savedLogsPullScriptName = 'pull_saved_logs.ps1'
@@ -12,6 +14,7 @@ const savedLogsPullScriptPath = path.resolve(process.cwd(), '../scripts', savedL
 
 const scripts = listManagedScripts()
 const statsPullScript = scripts.find((script) => script.name === statsPullScriptName)
+const gameLogsPullScript = scripts.find((script) => script.name === gameLogsPullScriptName)
 const savedPullScript = scripts.find((script) => script.name === savedPullScriptName)
 const savedLogsPullScript = scripts.find((script) => script.name === savedLogsPullScriptName)
 
@@ -31,6 +34,27 @@ assert(statsPullScript?.params?.some((param) => (
 const statsPullScriptContent = fs.readFileSync(statsPullScriptPath, 'utf-8')
 assert(statsPullScriptContent.includes("Split-Path -Parent $PSScriptRoot"), 'pull_latest_stats.ps1 should resolve its default output from the repo root')
 assert(statsPullScriptContent.includes("Join-Path $repoRoot 'PerformanceData'"), 'pull_latest_stats.ps1 should use PerformanceData as the default output root')
+
+assert(fs.existsSync(gameLogsPullScriptPath), `${gameLogsPullScriptName} should exist in the built-in scripts directory`)
+assert.equal(gameLogsPullScript?.type, 'ps1')
+assert.equal(gameLogsPullScript?.path, gameLogsPullScriptPath)
+assert.deepEqual(gameLogsPullScript?.params?.map((param) => param.key), [
+  'packageName',
+  'projectName',
+  'deviceSerial',
+  'localDir',
+  'fallbackToLogcat',
+])
+assert(gameLogsPullScript?.params?.some((param) => (
+  param.key === 'fallbackToLogcat'
+  && param.argName === '-FallbackToLogcat'
+  && param.label === '失败时导出 logcat'
+)), 'pull_game_logs.ps1 should expose the logcat fallback switch')
+
+const gameLogsPullScriptContent = fs.readFileSync(gameLogsPullScriptPath, 'utf-8')
+assert(gameLogsPullScriptContent.includes("Join-Path (Join-Path $repoRoot 'PerformanceData') 'Logs'"), 'pull_game_logs.ps1 should default pulled logs into PerformanceData/Logs')
+assert(gameLogsPullScriptContent.includes("'logcat', '-d', '--pid'"), 'pull_game_logs.ps1 should fall back to current-process logcat when Saved logs are private')
+assert(gameLogsPullScriptContent.includes("'-t', '20000'"), 'pull_game_logs.ps1 should save a recent logcat buffer when the game is not running')
 
 assert(fs.existsSync(savedPullScriptPath), `${savedPullScriptName} should exist in the built-in scripts directory`)
 assert.equal(savedPullScript?.type, 'ps1')

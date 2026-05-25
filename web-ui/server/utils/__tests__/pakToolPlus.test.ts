@@ -114,10 +114,23 @@ const pushPlan = createPakPushPlan({
 })
 assert.equal(pushPlan.targetPakName, 'tex_patch_hotfix_test.pak')
 assert.equal(pushPlan.targetSigName, 'tex_patch_hotfix_test.sig')
+assert.equal(pushPlan.remoteTempDir, '/data/local/tmp/cgtools-pak-push')
 assert.deepEqual(pushPlan.steps.map((step) => step.args.slice(0, 2)), [
   ['-s', 'DEVICE123'],
   ['-s', 'DEVICE123'],
   ['-s', 'DEVICE123'],
+  ['-s', 'DEVICE123'],
+  ['-s', 'DEVICE123'],
+  ['-s', 'DEVICE123'],
+  ['-s', 'DEVICE123'],
+  ['-s', 'DEVICE123'],
+  ['-s', 'DEVICE123'],
 ])
-assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteDir}/tex_patch_hotfix_test.pak`)))
-assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteDir}/tex_patch_hotfix_test.sig`)))
+assert(pushPlan.steps.some((step) => step.args.join(' ').includes(`${pushPlan.remoteDir}/tex_patch_hotfix_test.pak`)))
+assert(pushPlan.steps.some((step) => step.args.join(' ').includes(`${pushPlan.remoteDir}/tex_patch_hotfix_test.sig`)))
+assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteTempDir}/tex_patch_hotfix_test.pak`)))
+assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteTempDir}/tex_patch_hotfix_test.sig`)))
+assert.equal(pushPlan.steps.filter((step) => step.cmd === 'adb' && step.args.includes('push')).length, 2)
+assert(pushPlan.steps
+  .filter((step) => step.name.startsWith('Push '))
+  .every((step) => String(step.args.at(-1)).startsWith(pushPlan.remoteTempDir)))

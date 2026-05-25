@@ -60,6 +60,7 @@ export type PakPushPlan = GeneratedPakPair & {
   targetPakName: string
   targetSigName: string
   remoteDir: string
+  remoteTempDir: string
   steps: PakCommandStep[]
 }
 
@@ -115,6 +116,38 @@ export const buildAndroidSavedPaksDir = (
   const safeGameName = String(gameName || '').trim() || DEFAULT_GAME_NAME
   return `/sdcard/Android/data/${safePackageName}/files/UE4Game/${safeGameName}/${safeGameName}/Saved/Paks`
 }
+
+const createInstallFromTempStep = (
+  deviceArgs: string[],
+  sourcePath: string,
+  targetPath: string,
+  targetName: string,
+): PakCommandStep => ({
+  name: `Install ${targetName} from adb temp`,
+  cmd: 'adb',
+  // Android/data 直推可能在 adb 的 fchown 收尾阶段失败；先推临时目录再设备侧复制，避开该限制。
+  args: [...deviceArgs, 'shell', 'cp', sourcePath, targetPath],
+})
+
+const createRemoveTempStep = (
+  deviceArgs: string[],
+  tempPath: string,
+  targetName: string,
+): PakCommandStep => ({
+  name: `Remove adb temp ${targetName}`,
+  cmd: 'adb',
+  args: [...deviceArgs, 'shell', 'rm', '-f', tempPath],
+})
+
+const createRemoveRemoteTargetStep = (
+  deviceArgs: string[],
+  targetPath: string,
+  targetName: string,
+): PakCommandStep => ({
+  name: `Remove existing ${targetName}`,
+  cmd: 'adb',
+  args: [...deviceArgs, 'shell', 'rm', '-f', targetPath],
+})
 
 export const parsePakVersionFromName = (fileName: string) => {
   const normalized = String(fileName || '').trim()
@@ -225,6 +258,11 @@ export const createPakPushPlan = (payload: PakPushPayload): PakPushPlan => {
   const targetPakName = `${targetBaseName}.pak`
   const targetSigName = `${targetBaseName}.sig`
   const remoteDir = buildAndroidSavedPaksDir(payload.packageName, payload.gameName)
+  const remoteTempDir = '/data/local/tmp/cgtools-pak-push'
+  const remoteTempPakPath = `${remoteTempDir}/${targetPakName}`
+  const remoteTempSigPath = `${remoteTempDir}/${targetSigName}`
+  const remotePakPath = `${remoteDir}/${targetPakName}`
+  const remoteSigPath = `${remoteDir}/${targetSigName}`
   const deviceArgs = payload.deviceSerial?.trim() ? ['-s', payload.deviceSerial.trim()] : []
 
   return {
@@ -232,22 +270,29 @@ export const createPakPushPlan = (payload: PakPushPayload): PakPushPlan => {
     targetPakName,
     targetSigName,
     remoteDir,
+    remoteTempDir,
     steps: [
       {
         name: 'Create remote Saved/Paks directory',
         cmd: 'adb',
-        args: [...deviceArgs, 'shell', 'mkdir', '-p', remoteDir],
+        args: [...deviceArgs, 'shell', 'mkdir', '-p', remoteDir, remoteTempDir],
       },
       {
-        name: `Push ${targetPakName}`,
+        name: `Push ${targetPakName} to adb temp`,
         cmd: 'adb',
-        args: [...deviceArgs, 'push', pair.pakPath, `${remoteDir}/${targetPakName}`],
+        args: [...deviceArgs, 'push', pair.pakPath, remoteTempPakPath],
       },
+      createRemoveRemoteTargetStep(deviceArgs, remotePakPath, targetPakName),
+      createInstallFromTempStep(deviceArgs, remoteTempPakPath, remotePakPath, targetPakName),
+      createRemoveTempStep(deviceArgs, remoteTempPakPath, targetPakName),
       {
-        name: `Push ${targetSigName}`,
+        name: `Push ${targetSigName} to adb temp`,
         cmd: 'adb',
-        args: [...deviceArgs, 'push', pair.sigPath, `${remoteDir}/${targetSigName}`],
+        args: [...deviceArgs, 'push', pair.sigPath, remoteTempSigPath],
       },
+      createRemoveRemoteTargetStep(deviceArgs, remoteSigPath, targetSigName),
+      createInstallFromTempStep(deviceArgs, remoteTempSigPath, remoteSigPath, targetSigName),
+      createRemoveTempStep(deviceArgs, remoteTempSigPath, targetSigName),
     ],
   }
 }

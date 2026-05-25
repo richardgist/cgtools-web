@@ -19,6 +19,7 @@ export interface UpdateCodeAssetsPayload {
 
 const UPDATE_CODE_ASSETS_SCRIPT = path.resolve(process.cwd(), 'server', 'scripts', 'update-code-assets.py')
 const UPDATE_CODE_ASSETS_PATHS_INI = path.resolve(process.cwd(), 'server', 'config', 'android-so-update-paths.ini')
+const REPLACE_MANAGER_SOURCE_DIR = 'I:\\cgtools\\ReplaceManager'
 
 export interface P4ClientRootMatch {
   client: string
@@ -275,6 +276,24 @@ const buildVersionUpdateArgs = (
   return args
 }
 
+const buildReplaceManagerUpdateStep = (dryRun: boolean): CommandStep => {
+  if (dryRun) {
+    return {
+      name: 'Update ReplaceManager',
+      cmd: 'powershell',
+      args: ['-NoProfile', '-Command', `Write-Output "[dry-run] svn update ${REPLACE_MANAGER_SOURCE_DIR} --non-interactive"`],
+      cwd: REPLACE_MANAGER_SOURCE_DIR,
+    }
+  }
+
+  return {
+    name: 'Update ReplaceManager',
+    cmd: 'svn',
+    args: ['update', REPLACE_MANAGER_SOURCE_DIR, '--non-interactive'],
+    cwd: REPLACE_MANAGER_SOURCE_DIR,
+  }
+}
+
 export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): JobPlan => {
   const errors: string[] = []
   const warnings: string[] = []
@@ -319,6 +338,8 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
     cwd: svnUpdatePaths[0] || projectDir,
   })
 
+  steps.push(buildReplaceManagerUpdateStep(payload.dryRun === true))
+
   warnings.push(`Parsed version text: P4@${versionInfo.mergedP4Head || '-'}, SVN@${versionInfo.mergedSvnHead || '-'}, P4Merge=${versionInfo.p4Merge.join(',') || '-'}, SVNMerge=${versionInfo.svnMerge.join(',') || '-'}`)
   if (hasAssetVersions) {
     if (p4ClientMatch) {
@@ -332,6 +353,10 @@ export const buildUpdateCodeAssetsPlan = (payload: UpdateCodeAssetsPayload): Job
   if (hasSvnVersions) {
     warnings.push(`SVN update paths: ${svnUpdatePaths.join('; ')}`)
   }
+  addValidation(errors, fs.existsSync(REPLACE_MANAGER_SOURCE_DIR), `ReplaceManager source not found: ${REPLACE_MANAGER_SOURCE_DIR}`)
+  addValidation(errors, fs.existsSync(path.join(REPLACE_MANAGER_SOURCE_DIR, '.svn')), `ReplaceManager is not an SVN working copy: ${REPLACE_MANAGER_SOURCE_DIR}`)
+  warnings.push(`ReplaceManager update path: ${REPLACE_MANAGER_SOURCE_DIR}`)
+  warnings.push('ReplaceManager update only runs svn update; local ReplaceManager changes are not reverted or cleaned.')
 
   return {
     steps,

@@ -82,6 +82,30 @@ const SCRIPT_PARAMETER_OVERRIDES: Record<string, Record<string, Partial<ScriptPa
         required: true,
     },
   },
+  'pull_game_logs.ps1': {
+    packageName: {
+        label: '包名',
+        placeholder: 'Android package name',
+        required: true,
+    },
+    projectName: {
+        label: 'UE 项目名',
+        placeholder: 'UE4Game 下的项目目录名',
+        required: true,
+    },
+    deviceSerial: {
+        label: '设备序列号',
+        placeholder: '多设备时填写 adb serial',
+    },
+    localDir: {
+        label: '保存目录',
+        placeholder: '默认保存到 PerformanceData/Logs',
+    },
+    fallbackToLogcat: {
+        label: '失败时导出 logcat',
+        placeholder: '1=Saved 日志被拒时导出当前进程 logcat，0=只拉 Saved 文件',
+    },
+  },
   'pull_saved_dir.ps1': {
     packageName: {
         label: '包名',

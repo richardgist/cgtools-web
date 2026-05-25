@@ -104,7 +104,7 @@
                 P4Merge <code>{{ parsedVersionUpdate.p4Merge.join(', ') || '-' }}</code>,
                 SVNMerge <code>{{ parsedVersionUpdate.svnMerge.join(', ') || '-' }}</code>
               </div>
-              <div class="hint-line warn">Update runs as two independent nodes: assets by P4 first, then SVN. P4 paths come only from the INI config; dirs listed in <code>+ExpandChildren</code> are split by subdir, and the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory is never synced directly.</div>
+              <div class="hint-line warn">Update runs as three nodes: assets by P4 first, project SVN second, then ReplaceManager SVN. P4 paths come only from the INI config; dirs listed in <code>+ExpandChildren</code> are split by subdir, and the outer <code>{{ sharedPaths.projectFile.replace(/[\\/][^\\/]+$/, '') }}</code> directory is never synced directly.</div>
             </div>
           </div>
 
@@ -373,6 +373,9 @@ const LEGACY_STORAGE_KEY = 'cgtools_android_so_settings_v1'
 const STORAGE_KEY = 'cgtools_android_so_profiles_v2'
 const DEFAULT_PROJECT_ROOT = 'C:\\CJGame\\PRE418'
 const SAFE_PATHS_INI_PATH = 'web-ui/server/config/android-so-update-paths.ini'
+const REPLACE_MANAGER_SOURCE_DIR = 'I:\\cgtools\\ReplaceManager'
+const REPLACE_MANAGER_DIR = `${REPLACE_MANAGER_SOURCE_DIR}\\RevertTool`
+const REPLACE_MANAGER_TOOL = `${REPLACE_MANAGER_DIR}\\ReplaceManagerTool.py`
 const SETTINGS_KEYS = [
   'projectRoot',
   'buildMode',
@@ -869,6 +872,9 @@ const buildVersionUpdatePreviewSteps = () => {
   const parsed = parsedVersionUpdate.value
   const projectDir = sharedPaths.value.projectFile.replace(/[\\/][^\\/]+$/, '')
   const p4PathLabel = `${SAFE_PATHS_INI_PATH} (+Paths / +ExpandChildren)`
+  const replaceManagerCommand = settings.versionUpdateDryRun
+    ? `[dry-run] svn update ${quote(REPLACE_MANAGER_SOURCE_DIR)} --non-interactive`
+    : `svn update ${quote(REPLACE_MANAGER_SOURCE_DIR)} --non-interactive`
 
   return [
     createPreviewStep(
@@ -892,6 +898,7 @@ const buildVersionUpdatePreviewSteps = () => {
       ].join('\n'),
       projectDir,
     ),
+    createPreviewStep('Update ReplaceManager', replaceManagerCommand, REPLACE_MANAGER_SOURCE_DIR),
   ]
 }
 
@@ -905,31 +912,25 @@ const buildBuildPreviewSteps = () => {
   const archArg = archToUbtArg(settings.arch)
   const resolvedLogPath = settings.logPath?.trim() ? settings.logPath.trim() : defaultBuildLogPath.value
   const parallelArg = Number.isInteger(settings.maxParallelActions) && settings.maxParallelActions > 0 ? ` -MaxParallelActions=${settings.maxParallelActions}` : ''
-  const replaceManagerDir = 'I:\\cgtools\\ReplaceManager\\RevertTool'
-  const replaceManagerSourceDir = 'I:\\cgtools\\ReplaceManager'
-  const replaceManagerTool = `${replaceManagerDir}\\ReplaceManagerTool.py`
   const baseCommand = `${quote(ubtExe)} ${targetName} Android ${settings.config} -Project=${quote(projectFile)} ${quote(projectFile)} -NoUBTMakefiles -remoteini=${quote(projectDir)} -skipdeploy -BuildPipeline= ${archArg}${shippingDevArg} -forceframepointer -noxge`
-  const replaceCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} restore`
+  const replaceCommand = `python ${quote(REPLACE_MANAGER_TOOL)} ${quote(REPLACE_MANAGER_SOURCE_DIR)} ${quote(settings.projectRoot)} restore`
   const iniCommand = `cgtools:update-default-engine-ini -Path=${quote(defaultEngineIniPath.value)} ${Object.entries(getDefaultEngineIniAndroidAbiSettings(settings.arch)).map(([key, value]) => `-${key}=${value}`).join(' ')}`
   const manifestCommand = `${baseCommand} -generatemanifest${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
   const buildCommand = `${baseCommand}${parallelArg} -log=${quote(resolvedLogPath)} -NoHotReload`
 
   return [
     createPreviewStep('Update DefaultEngine.ini Android ABI', iniCommand, projectDir),
-    createPreviewStep('Prepare ReplaceManager patch', replaceCommand, replaceManagerDir),
+    createPreviewStep('Prepare ReplaceManager patch', replaceCommand, REPLACE_MANAGER_DIR),
     createPreviewStep('Generate UBT manifest', manifestCommand, settings.projectRoot),
     createPreviewStep('Build Android SO with UBT', buildCommand, settings.projectRoot),
   ]
 }
 
 const buildCleanReplaceManagerPreviewSteps = () => {
-  const replaceManagerDir = 'I:\\cgtools\\ReplaceManager\\RevertTool'
-  const replaceManagerSourceDir = 'I:\\cgtools\\ReplaceManager'
-  const replaceManagerTool = `${replaceManagerDir}\\ReplaceManagerTool.py`
-  const cleanCommand = `python ${quote(replaceManagerTool)} ${quote(replaceManagerSourceDir)} ${quote(settings.projectRoot)} clean`
+  const cleanCommand = `python ${quote(REPLACE_MANAGER_TOOL)} ${quote(REPLACE_MANAGER_SOURCE_DIR)} ${quote(settings.projectRoot)} clean`
 
   return [
-    createPreviewStep('Clean ReplaceManager state', cleanCommand, replaceManagerDir),
+    createPreviewStep('Clean ReplaceManager state', cleanCommand, REPLACE_MANAGER_DIR),
   ]
 }
 

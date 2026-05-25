@@ -154,14 +154,16 @@ try {
     dryRun: true,
   })
 
-  assert.deepEqual(updatePlan.steps.map((step) => step.name), ['Update Assets (P4)', 'Update SVN'])
+  assert.deepEqual(updatePlan.steps.map((step) => step.name), ['Update Assets (P4)', 'Update SVN', 'Update ReplaceManager'])
   assert(updatePlan.preview.includes('5996991'))
   assert.equal(updatePlan.steps[0]?.cmd, 'python')
   assert.equal(updatePlan.steps[1]?.cmd, 'python')
+  assert.equal(updatePlan.steps[2]?.cmd, 'powershell')
   assert(updatePlan.preview.includes('update-code-assets.py'))
   assert(updatePlan.preview.includes('--version-text'))
   assert(updatePlan.preview.includes('--step p4'))
   assert(updatePlan.preview.includes('--step svn'))
+  assert(updatePlan.preview.includes('[dry-run] svn update I:\\cgtools\\ReplaceManager --non-interactive'))
   const svnPathsJson = updatePlan.steps[1]?.args[updatePlan.steps[1]?.args.indexOf('--svn-update-paths-json') + 1] || '[]'
   const svnPaths = JSON.parse(svnPathsJson)
   assert(svnPaths.includes(path.join(tempRoot, 'Survive')))

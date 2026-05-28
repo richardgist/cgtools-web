@@ -489,6 +489,11 @@ const buildInjectPlan = (payload: InjectBPayload): JobPlan => {
 
   const steps: CommandStep[] = [
     {
+      name: 'Force-stop package before runtime file push',
+      cmd: 'adb',
+      args: ['shell', 'am', 'force-stop', payload.packageName],
+    },
+    {
       name: 'Push inject_demo',
       cmd: 'adb',
       args: ['push', injectDemoPath, '/data/local/tmp/'],
@@ -579,6 +584,11 @@ const buildPushSoPlan = (payload: PushSoPayload): JobPlan => {
     const packageName = (payload.packageName || '').trim()
     const steps: CommandStep[] = [
       {
+        name: 'Force-stop package before SO push',
+        cmd: 'adb',
+        args: ['shell', 'am', 'force-stop', packageName],
+      },
+      {
         name: 'Push target libUE4.so to temp path',
         cmd: 'adb',
         args: ['push', payload.soPath, '/data/local/tmp/libUE4.so'],
@@ -609,6 +619,7 @@ const buildPushSoPlan = (payload: PushSoPayload): JobPlan => {
     }
 
     warnings.push(`Run-as mode enabled, target package: ${packageName}`)
+    warnings.push(`Package will be force-stopped before replacing libUE4.so: ${packageName}`)
     if (payload.launchAfterPush) {
       warnings.push(`Package will be launched after push: ${packageName}`)
     }

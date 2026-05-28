@@ -22,6 +22,13 @@ assert.match(scriptsPage, /CONSOLE_MAP_POINT_PRESETS_STORAGE_KEY/)
 const manualStart = scriptsPage.indexOf('aria-label="手动 Console 命令"')
 assert(manualStart >= 0, 'manual console command panel should be the default tab content')
 
+const manualEnd = scriptsPage.indexOf('</section>', manualStart)
+const suggestionStart = scriptsPage.indexOf('class="console-suggestion-popover"', manualStart)
+assert(
+  suggestionStart > manualStart && suggestionStart < manualEnd,
+  'console suggestions should render directly under the manual command input',
+)
+
 const mapGateStart = scriptsPage.indexOf('v-if="consoleToolTab === \'map-points\'"')
 assert(mapGateStart >= 0, 'map-point preset section should be gated by the map-points tab')
 
@@ -50,5 +57,7 @@ assert.match(scriptsPage, /\.console-panel\s*{[^}]*flex:\s*0 0 auto/s)
 assert.match(scriptsPage, /\.console-panel\s*{[^}]*max-height:\s*70vh/s)
 assert.match(scriptsPage, /\.console-panel\s*{[^}]*overflow-x:\s*hidden/s)
 assert.match(scriptsPage, /\.console-panel\s*{[^}]*overflow-y:\s*auto/s)
+assert.doesNotMatch(scriptsPage, /\.console-suggestion-popover\s*{[^}]*position:\s*absolute/s)
+assert.doesNotMatch(scriptsPage, /\.console-suggestion-popover\s*{[^}]*top:\s*106px/s)
 assert.match(scriptsPage, /\.a5-point-grid\s*{[^}]*grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(150px,\s*1fr\)\)/s)
 assert.match(scriptsPage, /\.a5-point-grid\s*{[^}]*min-height:\s*96px/s)

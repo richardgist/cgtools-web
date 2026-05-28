@@ -255,11 +255,26 @@
                 spellcheck="false"
                 placeholder="输入要发送到游戏的 UE console command。支持一行一条，或用分号分隔多条命令。"
                 :disabled="isRunning"
+                @focus="isConsoleCommandFocused = true"
+                @blur="isConsoleCommandFocused = false"
                 @input="updateConsoleCursor"
                 @click="updateConsoleCursor"
                 @keyup="updateConsoleCursor"
                 @keydown="handleConsoleCommandKeydown"
               ></textarea>
+              <div v-if="visibleConsoleSuggestions.length" class="console-suggestion-popover">
+                <button
+                  v-for="(suggestion, index) in visibleConsoleSuggestions"
+                  :key="suggestion.name"
+                  class="console-suggestion-item"
+                  :class="{ active: index === consoleSuggestionIndex }"
+                  type="button"
+                  @mousedown.prevent="acceptConsoleSuggestion(suggestion)"
+                >
+                  <span class="suggestion-name">{{ suggestion.name }}</span>
+                  <span v-if="suggestion.description" class="suggestion-desc">{{ suggestion.description }}</span>
+                </button>
+              </div>
             </section>
             <section v-if="consoleToolTab === 'map-points'" class="console-preset-page" aria-label="地图点位">
               <div class="console-preset-head">
@@ -394,19 +409,6 @@
               />
               <span class="console-tag-hint">收录后会显示在左侧历史命令上</span>
             </div>
-            <div v-if="consoleToolTab === 'manual' && consoleSuggestions.length" class="console-suggestion-popover">
-              <button
-                v-for="(suggestion, index) in consoleSuggestions"
-                :key="suggestion.name"
-                class="console-suggestion-item"
-                :class="{ active: index === consoleSuggestionIndex }"
-                type="button"
-                @mousedown.prevent="acceptConsoleSuggestion(suggestion)"
-              >
-                <span class="suggestion-name">{{ suggestion.name }}</span>
-                <span v-if="suggestion.description" class="suggestion-desc">{{ suggestion.description }}</span>
-              </button>
-            </div>
             <div class="console-sync-row">
               <span class="console-sync-state" :class="{ error: consoleCommandLoadError }">{{ consoleCommandStatusText }}</span>
               <button class="command-btn command-save compact" @click="rememberConsoleCommand" :disabled="!consoleCommand.trim()">
@@ -521,6 +523,11 @@
 <script setup>
 import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import { moveConsoleHistoryItem } from '~/utils/consoleHistoryOrder'
+import {
+  buildConsoleCommandSuggestions,
+  getConsoleCommandPrefix,
+  shouldShowConsoleSuggestions,
+} from '~/utils/consoleCommandSuggestions.js'
 import {
   buildA5LowFrameCaptureCommand,
   buildA5LowFrameCaptureFrameCommand,
@@ -649,6 +656,8 @@ const cvarLoadError = ref('')
 const cvarFilter = ref('')
 const consoleCursorIndex = ref(0)
 const consoleSuggestionIndex = ref(0)
+const isConsoleCommandFocused = ref(false)
+const dismissedConsoleSuggestionPrefix = ref('')
 const isLoadingLocalConsoleCommands = ref(false)
 const isSyncingConsoleCommands = ref(false)
 const isLoadingCvars = ref(false)
@@ -759,26 +768,21 @@ const canRunCurrent = computed(() => {
   return Boolean(selectedScript.value && !isScriptDirty.value)
 })
 const currentConsolePrefix = computed(() => {
-  const beforeCursor = consoleCommand.value.slice(0, consoleCursorIndex.value)
-  const segment = beforeCursor.split(/[;\r\n]/).pop() || ''
-  return segment.trimStart()
+  return getConsoleCommandPrefix(consoleCommand.value, consoleCursorIndex.value)
 })
 const consoleSuggestions = computed(() => {
-  const prefix = currentConsolePrefix.value.toLowerCase()
-  if (!prefix) return []
-
-  const startsWith = []
-  const contains = []
-  for (const command of consoleCommands.value) {
-    const name = command.name.toLowerCase()
-    if (name.startsWith(prefix)) {
-      startsWith.push(command)
-    } else if (name.includes(prefix)) {
-      contains.push(command)
-    }
+  return buildConsoleCommandSuggestions(consoleCommands.value, currentConsolePrefix.value)
+})
+const visibleConsoleSuggestions = computed(() => {
+  if (!shouldShowConsoleSuggestions({
+    focused: isConsoleCommandFocused.value,
+    prefix: currentConsolePrefix.value,
+    dismissedPrefix: dismissedConsoleSuggestionPrefix.value,
+  })) {
+    return []
   }
 
-  return [...startsWith, ...contains].slice(0, 16)
+  return consoleSuggestions.value
 })
 const consoleCommandStatusText = computed(() => {
   if (isLoadingLocalConsoleCommands.value) return '正在读取本地命令库...'
@@ -1197,6 +1201,7 @@ const selectConsoleHistory = (item) => {
     consoleTextareaEl.value.focus()
     consoleTextareaEl.value.setSelectionRange(cursor, cursor)
     updateConsoleCursor()
+    dismissedConsoleSuggestionPrefix.value = currentConsolePrefix.value
   })
 }
 
@@ -1285,6 +1290,7 @@ const applyConsoleCommandSnapshot = (snapshot) => {
   consoleCommandUpdatedAt.value = Number(snapshot.updatedAt || 0)
   consoleCommandLoadError.value = ''
   consoleSuggestionIndex.value = 0
+  dismissedConsoleSuggestionPrefix.value = ''
 }
 
 const applyCvarSnapshot = (snapshot) => {
@@ -1426,12 +1432,12 @@ const syncConsoleCommands = async () => {
 
 const updateConsoleCursor = () => {
   consoleCursorIndex.value = consoleTextareaEl.value?.selectionStart ?? consoleCommand.value.length
-  if (consoleSuggestionIndex.value >= consoleSuggestions.value.length) {
+  if (consoleSuggestionIndex.value >= visibleConsoleSuggestions.value.length) {
     consoleSuggestionIndex.value = 0
   }
 }
 
-const acceptConsoleSuggestion = (suggestion = consoleSuggestions.value[consoleSuggestionIndex.value]) => {
+const acceptConsoleSuggestion = (suggestion = visibleConsoleSuggestions.value[consoleSuggestionIndex.value]) => {
   if (!suggestion || !consoleTextareaEl.value) return
 
   const cursor = consoleTextareaEl.value.selectionStart ?? consoleCommand.value.length
@@ -1449,6 +1455,7 @@ const acceptConsoleSuggestion = (suggestion = consoleSuggestions.value[consoleSu
   const nextCursor = replaceStart + suggestionText.length
   consoleCommand.value = nextValue
   consoleSuggestionIndex.value = 0
+  dismissedConsoleSuggestionPrefix.value = getConsoleCommandPrefix(nextValue, nextCursor)
 
   nextTick(() => {
     consoleTextareaEl.value.focus()
@@ -1464,21 +1471,21 @@ const handleConsoleCommandKeydown = (event) => {
     return
   }
 
-  if (!consoleSuggestions.value.length) return
+  if (!visibleConsoleSuggestions.value.length) return
 
   if (event.key === 'ArrowDown') {
     event.preventDefault()
-    consoleSuggestionIndex.value = (consoleSuggestionIndex.value + 1) % consoleSuggestions.value.length
+    consoleSuggestionIndex.value = (consoleSuggestionIndex.value + 1) % visibleConsoleSuggestions.value.length
   } else if (event.key === 'ArrowUp') {
     event.preventDefault()
-    consoleSuggestionIndex.value = (consoleSuggestionIndex.value - 1 + consoleSuggestions.value.length) % consoleSuggestions.value.length
+    consoleSuggestionIndex.value = (consoleSuggestionIndex.value - 1 + visibleConsoleSuggestions.value.length) % visibleConsoleSuggestions.value.length
   } else if (event.key === 'Tab' || event.key === 'Enter') {
     event.preventDefault()
     acceptConsoleSuggestion()
   } else if (event.key === 'Escape') {
     event.preventDefault()
     consoleSuggestionIndex.value = 0
-    consoleCursorIndex.value = 0
+    dismissedConsoleSuggestionPrefix.value = currentConsolePrefix.value
   }
 }
 
@@ -2539,6 +2546,9 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 }
 
 .console-manual-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   min-height: 0;
 }
 
@@ -2878,13 +2888,9 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 }
 
 .console-suggestion-popover {
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  top: 106px;
-  z-index: 10;
   display: flex;
-  max-height: 260px;
+  width: 100%;
+  max-height: 220px;
   flex-direction: column;
   overflow-y: auto;
   border: 1px solid rgba(96, 205, 255, 0.25);

@@ -43,11 +43,21 @@
       </section>
 
       <section class="fluent-card">
-        <div class="card-header">
-          <span>Shared Paths</span>
+        <div
+          class="card-header collapsible-header"
+          role="button"
+          tabindex="0"
+          :aria-expanded="String(!collapsePathSection)"
+          @click="togglePathSection"
+          @keydown.enter.prevent="togglePathSection"
+          @keydown.space.prevent="togglePathSection"
+        >
+          <span class="accordion-title">
+            <span class="accordion-arrow" :class="{ open: !collapsePathSection }"></span>
+            <span>Shared Paths</span>
+          </span>
           <div class="terminal-actions">
-            <button class="fluent-btn sub" @click="togglePathSection">{{ collapsePathSection ? 'Expand' : 'Collapse' }}</button>
-            <button class="fluent-btn sub" @click="refreshStatus">Refresh Status</button>
+            <button class="fluent-btn sub" @click.stop="refreshStatus">Refresh Status</button>
           </div>
         </div>
         <div class="card-body" v-if="!collapsePathSection">
@@ -73,8 +83,21 @@
       </section>
 
       <section class="fluent-card">
-        <div class="card-header">Current Step Settings</div>
-        <div class="card-body">
+        <div
+          class="card-header collapsible-header"
+          role="button"
+          tabindex="0"
+          :aria-expanded="String(!collapseSettingsSection)"
+          @click="toggleSettingsSection"
+          @keydown.enter.prevent="toggleSettingsSection"
+          @keydown.space.prevent="toggleSettingsSection"
+        >
+          <span class="accordion-title">
+            <span class="accordion-arrow" :class="{ open: !collapseSettingsSection }"></span>
+            <span>Current Step Settings</span>
+          </span>
+        </div>
+        <div class="card-body" v-if="!collapseSettingsSection">
           <div v-if="activeTab === 'updateCodeAssets'" class="field-grid">
             <div class="version-update-card">
               <div class="field-row textarea-row">
@@ -286,59 +309,75 @@
       </section>
 
       <section class="fluent-card">
-        <div class="card-header">
-          <span>Command Preview</span>
-          <div class="terminal-actions" v-if="runLogDir">
-            <button class="fluent-btn sub" @click="openLocalPath(runLogDir, 'folder')">Open Run Logs</button>
+        <div
+          class="card-header collapsible-header"
+          role="button"
+          tabindex="0"
+          :aria-expanded="String(!collapseCommandSteps)"
+          @click="toggleCommandSteps"
+          @keydown.enter.prevent="toggleCommandSteps"
+          @keydown.space.prevent="toggleCommandSteps"
+        >
+          <span class="accordion-title">
+            <span class="accordion-arrow" :class="{ open: !collapseCommandSteps }"></span>
+            <span>Command Preview</span>
+          </span>
+          <div class="terminal-actions">
+            <button v-if="runLogDir" class="fluent-btn sub" @click.stop="openLocalPath(runLogDir, 'folder')">Open Run Logs</button>
           </div>
         </div>
         <div class="card-body">
-          <div v-if="workflowNodes.length" class="workflow-flow">
-            <div
-              v-for="(node, index) in workflowNodes"
-              :key="node.key"
-              class="workflow-node-wrap"
-            >
+          <template v-if="!collapseCommandSteps">
+            <div v-if="workflowNodes.length" class="workflow-flow">
               <div
-                class="workflow-node"
-                :class="`workflow-node--${node.status}`"
-                :title="node.name"
+                v-for="(node, index) in workflowNodes"
+                :key="node.key"
+                class="workflow-node-wrap"
               >
-                <div class="workflow-node-top">
-                  <span class="workflow-node-dot">{{ node.statusIcon }}</span>
-                  <span class="workflow-node-step">Step {{ index + 1 }}</span>
-                </div>
-                <div class="workflow-node-name">{{ node.name }}</div>
-                <div class="workflow-node-footer">
-                  <div class="workflow-node-meta">
-                    <span class="workflow-node-status">{{ node.statusLabel }}</span>
-                    <span v-if="node.elapsedLabel" class="workflow-node-duration">{{ node.elapsedLabel }}</span>
+                <div
+                  class="workflow-node"
+                  :class="`workflow-node--${node.status}`"
+                  :title="node.name"
+                >
+                  <div class="workflow-node-top">
+                    <span class="workflow-node-dot">{{ node.statusIcon }}</span>
+                    <span class="workflow-node-step">Step {{ index + 1 }}</span>
                   </div>
-                  <button
-                    v-if="node.logPath"
-                    class="workflow-log-btn"
-                    @click.stop="openLocalPath(node.logPath)"
-                  >
-                    Log
-                  </button>
+                  <div class="workflow-node-name">{{ node.name }}</div>
+                  <div class="workflow-node-footer">
+                    <div class="workflow-node-meta">
+                      <span class="workflow-node-status">{{ node.statusLabel }}</span>
+                      <span v-if="node.elapsedLabel" class="workflow-node-duration">{{ node.elapsedLabel }}</span>
+                    </div>
+                    <button
+                      v-if="node.logPath"
+                      class="workflow-log-btn"
+                      @click.stop="openLocalPath(node.logPath)"
+                    >
+                      Log
+                    </button>
+                  </div>
                 </div>
+                <div v-if="index < workflowNodes.length - 1" class="workflow-edge"></div>
               </div>
-              <div v-if="index < workflowNodes.length - 1" class="workflow-edge"></div>
             </div>
-          </div>
-          <div v-if="commandPreviewSteps.length" class="preview-steps">
-            <div v-for="(step, index) in commandPreviewSteps" :key="`${activeTab}-${index}-${step.name}`" class="preview-step-card">
-              <div class="preview-step-header">
-                <div>
-                  <div class="preview-step-index">Step {{ index + 1 }}</div>
-                  <div class="preview-step-name">{{ step.name }}</div>
+            <div v-if="commandPreviewSteps.length" class="preview-steps">
+              <div v-for="(step, index) in commandPreviewSteps" :key="`${activeTab}-${index}-${step.name}`" class="preview-step-card">
+                <div class="preview-step-header">
+                  <div>
+                    <div class="preview-step-index">Step {{ index + 1 }}</div>
+                    <div class="preview-step-name">{{ step.name }}</div>
+                  </div>
+                  <button class="fluent-btn sub" @click="copyPreviewStep(step)">Copy</button>
                 </div>
-                <button class="fluent-btn sub" @click="copyPreviewStep(step)">Copy</button>
+                <pre class="preview-step-command">{{ step.display }}</pre>
               </div>
-              <pre class="preview-step-command">{{ step.display }}</pre>
             </div>
+            <div v-else class="hint-line">No commands available for the current tab.</div>
+          </template>
+          <div v-else class="preview-collapsed-summary">
+            <span>{{ commandPreviewSteps.length }} steps hidden</span>
           </div>
-          <div v-else class="hint-line">No commands available for the current tab.</div>
           <div class="action-row">
             <button class="fluent-btn" @click="copyPreview">{{ activeTab === 'guideC' ? 'Copy APL Snippet' : 'Copy All Commands' }}</button>
             <button class="fluent-btn primary" @click="runActive" :disabled="isRunning || activeTab === 'guideC'">Run</button>
@@ -403,7 +442,9 @@ const SETTINGS_KEYS = [
 
 const activeTab = ref('updateCodeAssets')
 const isRunning = ref(false)
-const collapsePathSection = ref(false)
+const collapsePathSection = ref(true)
+const collapseSettingsSection = ref(true)
+const collapseCommandSteps = ref(true)
 const terminalEl = ref(null)
 const logs = ref([])
 const lastOutputs = ref(null)
@@ -960,6 +1001,7 @@ const buildPushPreviewSteps = (soPath) => {
   if (settings.pushUseRunAs) {
     const packageName = settings.pushPackageName?.trim() || 'com.tencent.tmgp.pubgmhd'
     return [
+      createPreviewStep('Force-stop package before SO push', `adb shell am force-stop ${packageName}`),
       createPreviewStep('Push target libUE4.so to temp path', `adb push ${quote(soPath)} /data/local/tmp/libUE4.so`),
       createPreviewStep('Ensure app_lib exists', `adb shell run-as ${packageName} mkdir -p app_lib`),
       createPreviewStep('Copy SO into app_lib', `adb shell run-as ${packageName} cp /data/local/tmp/libUE4.so app_lib/libUE4.so`),
@@ -1009,6 +1051,7 @@ const commandPreviewSteps = computed(() => {
   if (activeTab.value === 'injectB') {
     const comp = settings.launchActivity.includes('/') ? settings.launchActivity : `${settings.packageName}/${settings.launchActivity}`
     return [
+      createPreviewStep('Force-stop package before runtime file push', `adb shell am force-stop ${settings.packageName}`),
       createPreviewStep('Push inject_demo', `adb push ${quote(sharedPaths.value.androidInjectDir + '\\inject_demo')} /data/local/tmp/`),
       createPreviewStep('Push lib_inject_entry.so', `adb push ${quote(sharedPaths.value.androidInjectDir + '\\lib_inject_entry.so')} /data/local/tmp/`),
       createPreviewStep('Push target libUE4.so', `adb push ${quote(settings.soPath)} /data/local/tmp/libUE4.so`),
@@ -1176,6 +1219,14 @@ const refreshStatus = async () => {
 
 const togglePathSection = () => {
   collapsePathSection.value = !collapsePathSection.value
+}
+
+const toggleSettingsSection = () => {
+  collapseSettingsSection.value = !collapseSettingsSection.value
+}
+
+const toggleCommandSteps = () => {
+  collapseCommandSteps.value = !collapseCommandSteps.value
 }
 
 const pickFolder = async (key) => {
@@ -1589,6 +1640,46 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
 }
 
+.collapsible-header {
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.collapsible-header:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.collapsible-header:focus-visible {
+  outline: 1px solid rgba(96, 205, 255, 0.65);
+  outline-offset: -1px;
+}
+
+.accordion-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.accordion-arrow {
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid var(--text-secondary);
+  transition: transform 120ms ease, border-left-color 120ms ease;
+}
+
+.collapsible-header:hover .accordion-arrow,
+.accordion-arrow.open {
+  border-left-color: var(--text-primary);
+}
+
+.accordion-arrow.open {
+  transform: rotate(90deg);
+}
+
 .workflow-flow {
   display: flex;
   gap: 0;
@@ -1765,6 +1856,25 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.preview-collapsed-summary {
+  min-height: 42px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+  color: var(--text-secondary);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.preview-collapsed-summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .preview-step-card {

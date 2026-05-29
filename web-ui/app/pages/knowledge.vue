@@ -202,6 +202,64 @@
       </aside>
 
       <main class="kc-knowledge-main">
+        <section class="kc-knowledge-map-panel">
+          <div class="kc-knowledge-map-header">
+            <div>
+              <span class="kc-knowledge-overline">Architecture Overview</span>
+              <h2>知识架构总览</h2>
+            </div>
+            <div class="kc-knowledge-map-stats">
+              <span>{{ knowledgeHomeCategoryStats.length }} 大类</span>
+              <span>{{ KNOWLEDGE_SUBCATEGORIES.length }} 子分类</span>
+            </div>
+          </div>
+
+          <div class="kc-knowledge-map">
+            <div
+              v-for="row in knowledgeMapRows"
+              :key="row.id"
+              class="kc-map-row"
+            >
+              <div class="kc-map-row-label">
+                <strong>{{ row.title }}</strong>
+                <span>{{ row.subtitle }}</span>
+              </div>
+              <div class="kc-map-row-body">
+                <div
+                  v-for="category in row.categories"
+                  :key="category.id"
+                  class="kc-map-category"
+                  :class="{ active: selectedKnowledgeHomeCategoryId === category.id }"
+                  :style="{ '--category-accent': category.accent }"
+                  role="button"
+                  tabindex="0"
+                  @click="selectKnowledgeHomeCategory(category)"
+                  @keydown.enter="selectKnowledgeHomeCategory(category)"
+                  @keydown.space.prevent="selectKnowledgeHomeCategory(category)"
+                >
+                  <div class="kc-map-category-title">
+                    <span>{{ category.title }}</span>
+                    <strong>{{ category.cardCount }}</strong>
+                  </div>
+                  <div class="kc-map-subcategories">
+                    <button
+                      v-for="subcategory in knowledgeMapSubcategoriesByCategory[category.id] || []"
+                      :key="subcategory.id"
+                      type="button"
+                      class="kc-map-subcategory"
+                      :class="{ active: selectedKnowledgeSubcategory?.id === subcategory.id }"
+                      @click.stop="selectKnowledgeSubcategoryFromMap(category, subcategory)"
+                    >
+                      <span>{{ subcategory.title }}</span>
+                      <strong>{{ subcategory.cardCount }}</strong>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section
           v-if="selectedKnowledgeHomeCategory"
           class="kc-knowledge-category-panel"
@@ -1103,6 +1161,27 @@ const KNOWLEDGE_SUBCATEGORIES: KnowledgeSubcategory[] = [
   },
 ]
 
+const KNOWLEDGE_MAP_ROW_CONFIG = [
+  {
+    id: 'runtime_core',
+    title: '运行时核心',
+    subtitle: 'Gameplay 对象模型',
+    categoryIds: ['game_framework'],
+  },
+  {
+    id: 'presentation_perf',
+    title: '表现与性能',
+    subtitle: '渲染、特效、序列与分析',
+    categoryIds: ['rendering_scene_perf', 'vfx_sequence'],
+  },
+  {
+    id: 'production_support',
+    title: '工具与平台支撑',
+    subtitle: '自动化、平台、Agent 与 Web',
+    categoryIds: ['tools_automation', 'runtime_platform', 'ai_web_knowledge'],
+  },
+]
+
 const selectedKnowledgeHomeCategoryId = ref(KNOWLEDGE_HOME_CATEGORIES[0]?.id || '')
 const selectedKnowledgeSubcategory = ref<KnowledgeSubcategory | null>(null)
 const selectedKnowledgeSubcategorySearchText = ref('')
@@ -1231,6 +1310,29 @@ const selectedKnowledgeSubcategoryStats = computed(() => {
     .map(item => ({ ...item, cardCount: knowledgeSubcategoryCounts.value[item.id] || 0 }))
 })
 
+const knowledgeMapSubcategoriesByCategory = computed(() => {
+  const map: Record<string, Array<KnowledgeSubcategory & { cardCount: number }>> = {}
+  for (const category of KNOWLEDGE_HOME_CATEGORIES) {
+    map[category.id] = KNOWLEDGE_SUBCATEGORIES
+      .filter(item => item.categoryId === category.id)
+      .map(item => ({ ...item, cardCount: knowledgeSubcategoryCounts.value[item.id] || 0 }))
+  }
+  return map
+})
+
+const knowledgeMapRows = computed(() => {
+  return KNOWLEDGE_MAP_ROW_CONFIG.map(row => ({
+    ...row,
+    categories: row.categoryIds
+      .map(categoryId => knowledgeHomeCategoryStats.value.find(category => category.id === categoryId))
+      .filter((category): category is KnowledgeHomeCategory & {
+        cardCount: number
+        subcategoryCount: number
+        matchedSubcategoryCount: number
+      } => Boolean(category)),
+  }))
+})
+
 const selectedKnowledgeSubcategoryCategory = computed(() => {
   if (!selectedKnowledgeSubcategory.value) return null
   return KNOWLEDGE_HOME_CATEGORIES.find(item => item.id === selectedKnowledgeSubcategory.value?.categoryId) || null
@@ -1259,6 +1361,12 @@ function selectKnowledgeHomeCategory(category: KnowledgeHomeCategory) {
 }
 
 function selectKnowledgeSubcategory(subcategory: KnowledgeSubcategory) {
+  selectedKnowledgeSubcategory.value = subcategory
+  selectedKnowledgeSubcategorySearchText.value = ''
+}
+
+function selectKnowledgeSubcategoryFromMap(category: KnowledgeHomeCategory, subcategory: KnowledgeSubcategory) {
+  selectedKnowledgeHomeCategoryId.value = category.id
   selectedKnowledgeSubcategory.value = subcategory
   selectedKnowledgeSubcategorySearchText.value = ''
 }
@@ -4657,10 +4765,181 @@ onMounted(() => {
 .kc-knowledge-main {
   display: grid;
   grid-template-columns: minmax(420px, 0.95fr) minmax(360px, 1.05fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 18px;
   min-height: 0;
   overflow: hidden;
   padding: 20px;
+}
+
+.kc-knowledge-map-panel {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015)),
+    rgba(18,18,18,0.76);
+}
+
+.kc-knowledge-map-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.kc-knowledge-map-header h2 {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.kc-knowledge-map-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.kc-knowledge-map-stats span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.055);
+}
+
+.kc-knowledge-map {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.kc-map-row {
+  display: grid;
+  grid-template-columns: 126px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.kc-map-row-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-height: 84px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius-md);
+  background: rgba(0,0,0,0.2);
+}
+
+.kc-map-row-label strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.kc-map-row-label span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.kc-map-row-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.kc-map-category {
+  --category-accent: var(--accent-default);
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,0.075);
+  border-top: 3px solid var(--category-accent);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: rgba(255,255,255,0.026);
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, transform 0.18s;
+}
+
+.kc-map-category:hover,
+.kc-map-category.active {
+  border-color: color-mix(in srgb, var(--category-accent) 62%, rgba(255,255,255,0.1));
+  background: rgba(255,255,255,0.05);
+  transform: translateY(-1px);
+}
+
+.kc-map-category-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.kc-map-category-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.kc-map-category-title strong {
+  min-width: 28px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #111;
+  background: var(--category-accent);
+  text-align: center;
+  font-size: 11px;
+}
+
+.kc-map-subcategories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 6px;
+}
+
+.kc-map-subcategory {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,0.055);
+  border-radius: 6px;
+  padding: 6px 7px;
+  color: var(--text-tertiary);
+  background: rgba(0,0,0,0.16);
+  cursor: pointer;
+  transition: color 0.18s, border-color 0.18s, background 0.18s;
+}
+
+.kc-map-subcategory:hover,
+.kc-map-subcategory.active {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--category-accent) 55%, rgba(255,255,255,0.08));
+  background: color-mix(in srgb, var(--category-accent) 12%, rgba(0,0,0,0.16));
+}
+
+.kc-map-subcategory span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.kc-map-subcategory strong {
+  color: var(--category-accent);
+  font-size: 10px;
 }
 
 .kc-knowledge-category-panel,
@@ -4915,6 +5194,10 @@ onMounted(() => {
   .kc-subcategory-detail {
     overflow: visible;
   }
+
+  .kc-map-row {
+    grid-template-columns: 110px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 760px) {
@@ -4939,6 +5222,16 @@ onMounted(() => {
   .kc-knowledge-panel-header,
   .kc-subcategory-detail-header {
     flex-direction: column;
+  }
+
+  .kc-knowledge-map-header,
+  .kc-map-row {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .kc-knowledge-map-header {
+    display: flex;
   }
 
   .kc-subcategory-detail-actions {

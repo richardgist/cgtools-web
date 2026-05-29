@@ -48,7 +48,7 @@ export interface KnowledgeIndex {
     hubs: number
     maps: number
   }
-  cards: Omit<KnowledgeCardRecord, 'content'>[]
+  cards: KnowledgeCardRecord[]
 }
 
 const pad2 = (value: number) => String(value).padStart(2, '0')
@@ -286,7 +286,6 @@ export function buildKnowledgeIndex(): KnowledgeIndex {
   const cards = nodes
     .filter(node => node.type === 'card')
     .map(toCardRecord)
-    .map(({ content: _content, ...card }) => card)
     .sort((a, b) => b.id.localeCompare(a.id))
 
   return {

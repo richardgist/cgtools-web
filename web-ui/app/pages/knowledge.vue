@@ -3,8 +3,9 @@
     <div class="standard-page-header">
       <h1 class="header-title">知识卡片</h1>
       <div class="header-controls">
-        <span class="kc-badge">{{ filteredCards.length }} / {{ cards.length }} 张卡片</span>
+        <span class="kc-badge">{{ headerCardCount }} / {{ cards.length }} 张卡片</span>
         <div class="kc-view-switch">
+          <button class="kc-view-btn" :class="{ active: activeView === 'architecture' }" @click="activeView = 'architecture'">分类</button>
           <button class="kc-view-btn" :class="{ active: activeView === 'cards' }" @click="activeView = 'cards'">卡片</button>
           <button class="kc-view-btn" :class="{ active: activeView === 'graph' }" @click="showGraphView">网络</button>
         </div>
@@ -170,6 +171,132 @@
         </div>
       </div>
     </div>
+
+    <!-- 知识分类导航：大类 -> 子分类 -> 卡片 -->
+    <div v-else-if="activeView === 'architecture'" class="kc-knowledge-view">
+      <aside class="kc-knowledge-categories">
+        <div class="kc-knowledge-overview">
+          <span class="kc-knowledge-overline">Knowledge Map</span>
+          <strong>{{ knowledgeHomeMatchedCardCount }}</strong>
+          <span>已归入结构化分类</span>
+        </div>
+
+        <button
+          v-for="category in knowledgeHomeCategoryStats"
+          :key="category.id"
+          class="kc-knowledge-category"
+          :class="{ active: selectedKnowledgeHomeCategoryId === category.id }"
+          :style="{ '--category-accent': category.accent }"
+          @click="selectKnowledgeHomeCategory(category)"
+        >
+          <div class="kc-knowledge-category-main">
+            <span class="kc-knowledge-category-title">{{ category.title }}</span>
+            <span class="kc-knowledge-category-count">{{ category.cardCount }}</span>
+          </div>
+          <p>{{ category.subtitle }}</p>
+          <div class="kc-knowledge-category-meta">
+            <span>{{ category.matchedSubcategoryCount }} 个子分类有卡片</span>
+            <span>{{ category.subcategoryCount }} 个子分类</span>
+          </div>
+        </button>
+      </aside>
+
+      <main class="kc-knowledge-main">
+        <section
+          v-if="selectedKnowledgeHomeCategory"
+          class="kc-knowledge-category-panel"
+          :style="{ '--category-accent': selectedKnowledgeHomeCategory.accent }"
+        >
+          <div class="kc-knowledge-panel-header">
+            <div>
+              <span class="kc-knowledge-overline">{{ selectedKnowledgeHomeCategory.eyebrow }}</span>
+              <h2>{{ selectedKnowledgeHomeCategory.title }}</h2>
+              <p>{{ selectedKnowledgeHomeCategory.subtitle }}</p>
+            </div>
+            <div class="kc-knowledge-panel-count">
+              <strong>{{ selectedKnowledgeHomeCategory.cardCount }}</strong>
+              <span>cards</span>
+            </div>
+          </div>
+
+          <div class="kc-subcategory-grid">
+            <button
+              v-for="subcategory in selectedKnowledgeSubcategoryStats"
+              :key="subcategory.id"
+              class="kc-subcategory-card"
+              :class="{ active: selectedKnowledgeSubcategory?.id === subcategory.id }"
+              @mousemove="handleCardMouseMove"
+              @click="selectKnowledgeSubcategory(subcategory)"
+            >
+              <div class="kc-arch-card-glow"></div>
+              <div class="kc-subcategory-card-top">
+                <span>{{ subcategory.groupLabel }}</span>
+                <strong>{{ subcategory.cardCount }}</strong>
+              </div>
+              <h3>{{ subcategory.title }}</h3>
+              <p>{{ subcategory.subtitle }}</p>
+              <div class="kc-subcategory-signals">
+                <span v-for="tag in subcategory.previewTags" :key="tag">{{ tag }}</span>
+              </div>
+            </button>
+          </div>
+        </section>
+
+        <section class="kc-subcategory-detail" :class="{ empty: !selectedKnowledgeSubcategory }">
+          <template v-if="selectedKnowledgeSubcategory">
+            <div class="kc-subcategory-detail-header">
+              <div>
+                <span class="kc-knowledge-overline">{{ selectedKnowledgeSubcategoryCategory?.title }}</span>
+                <h3>{{ selectedKnowledgeSubcategory.title }}</h3>
+                <p>{{ selectedKnowledgeSubcategory.subtitle }}</p>
+              </div>
+              <div class="kc-subcategory-detail-actions">
+                <input
+                  v-model="selectedKnowledgeSubcategorySearchText"
+                  class="fluent-input"
+                  placeholder="搜索当前子分类..."
+                />
+                <button class="fluent-btn" @click="exploreKnowledgeSubcategoryInCardsView">
+                  到卡片视图 ({{ selectedKnowledgeSubcategoryTotalCount }})
+                </button>
+              </div>
+            </div>
+
+            <div v-if="selectedKnowledgeSubcategoryFilteredCards.length > 0" class="kc-subcategory-card-list">
+              <article
+                v-for="card in selectedKnowledgeSubcategoryFilteredCards"
+                :key="card.id"
+                class="kc-subcategory-result"
+                @click="openCard(card)"
+              >
+                <div class="kc-subcategory-result-meta">
+                  <span>{{ card.id }}</span>
+                  <span>{{ '⭐'.repeat(card.difficulty || 1) }}</span>
+                </div>
+                <h4>{{ card.title }}</h4>
+                <p>{{ card.summary }}</p>
+                <div class="kc-subcategory-result-tags">
+                  <span v-for="tag in (card.tags || []).slice(0, 6)" :key="tag">{{ tag }}</span>
+                </div>
+              </article>
+            </div>
+
+            <div v-else class="kc-subcategory-empty">
+              <strong>当前子分类暂无匹配卡片</strong>
+              <span>可以用更精确的 arch/* 标签或标题关键词补齐归属。</span>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="kc-subcategory-empty large">
+              <strong>先选一个子分类</strong>
+              <span>{{ selectedKnowledgeHomeCategory?.title }} 下的卡片会按子分类进入，不再直接摊开全部卡片。</span>
+            </div>
+          </template>
+        </section>
+      </main>
+    </div>
+
 
     <div v-else class="kc-network-view">
       <aside class="kc-network-sidebar">
@@ -337,6 +464,17 @@
             <div v-if="editCardError" class="kc-create-error">{{ editCardError }}</div>
           </div>
           <div v-else class="kc-modal-body" v-html="cardContentHtml"></div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Mermaid 全屏灯箱 Modal -->
+    <Teleport to="body">
+      <div v-if="zoomMermaidVisible" class="kc-mermaid-lightbox" @click="closeZoomMermaid">
+        <div class="kc-mermaid-lightbox-content" @click.stop>
+          <button class="kc-mermaid-lightbox-close" @click="closeZoomMermaid">×</button>
+          <div class="kc-mermaid-lightbox-body" v-html="zoomMermaidHtml"></div>
+          <p class="kc-mermaid-lightbox-hint">💡 鼠标滚轮缩放，按住鼠标左键可拖动平移图表</p>
         </div>
       </div>
     </Teleport>
@@ -610,6 +748,7 @@ interface KnowledgeCard {
   date: string
   tags: string[]
   summary: string
+  content?: string
   source?: string
   path?: string
 }
@@ -652,7 +791,483 @@ const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
 const cards = ref<KnowledgeCard[]>([])
 const loading = ref(false)
 const rebuildingIndex = ref(false)
-const activeView = ref<'cards' | 'graph'>('cards')
+const activeView = ref<'cards' | 'graph' | 'architecture'>('architecture')
+
+// --- 知识首页分类导航：先按问题域收敛，再进入子分类卡片 ---
+interface KnowledgeHomeCategory {
+  id: string
+  title: string
+  eyebrow: string
+  subtitle: string
+  accent: string
+}
+
+interface KnowledgeSubcategory {
+  id: string
+  categoryId: string
+  groupLabel: string
+  title: string
+  subtitle: string
+  archTag: string
+  techTags: string[]
+  previewTags: string[]
+  strongKeywords: string[]
+  semanticKeywords: string[]
+}
+
+const KNOWLEDGE_HOME_CATEGORIES: KnowledgeHomeCategory[] = [
+  { id: 'game_framework', title: 'Game Framework', eyebrow: 'Runtime Spine', subtitle: 'Gameplay 生命周期、Actor/Component、控制器与玩法对象模型', accent: '#60CDFF' },
+  { id: 'rendering_scene_perf', title: 'Rendering / Scene Perf', eyebrow: 'Frame & Visibility', subtitle: '渲染管线、可见性裁剪、LOD/HLOD、FrameAnalysis 与 RenderDoc', accent: '#9B8CFF' },
+  { id: 'vfx_sequence', title: 'VFX / Sequencer', eyebrow: 'Effect Pipeline', subtitle: 'Cascade、Niagara、VFXProfiler、LevelSequence 与特效编辑器', accent: '#FF8A65' },
+  { id: 'tools_automation', title: 'Tools / Automation', eyebrow: 'Editor Workflow', subtitle: 'UE Python、编辑器工具、构建打包、脚本运行和仓库工作流', accent: '#00B894' },
+  { id: 'runtime_platform', title: 'Runtime / Platform', eyebrow: 'Device & Ops', subtitle: '内存、线程、Android、网络上传、平台封装和服务器链路', accent: '#FDCB6E' },
+  { id: 'ai_web_knowledge', title: 'AI / Web / Knowledge', eyebrow: 'Agent & Product', subtitle: 'Agent 架构、LLM 工具、Nuxt/Vue 前端、知识管理与可视化', accent: '#FD79A8' },
+]
+
+const KNOWLEDGE_SUBCATEGORIES: KnowledgeSubcategory[] = [
+  {
+    id: 'gameplay_framework',
+    categoryId: 'game_framework',
+    groupLabel: '框架主干',
+    title: 'Gameplay Framework 基础',
+    subtitle: 'GameInstance、GameMode、GameState、Subsystem 与生命周期边界',
+    archTag: 'arch/gameplay_framework',
+    techTags: ['GameplayFramework', 'GameInstance', 'GameMode', 'GameState', 'Subsystem', 'Lifecycle'],
+    previewTags: ['GameInstance', 'GameMode', 'Subsystem'],
+    strongKeywords: ['UGameInstance', 'AGameModeBase', 'AGameStateBase', 'AGameSession', 'UGameplayStatics', 'Subsystem'],
+    semanticKeywords: ['生命周期', 'WorldContext', 'Gameplay Framework', 'World 级', '引擎架构'],
+  },
+  {
+    id: 'actor_component',
+    categoryId: 'game_framework',
+    groupLabel: '对象模型',
+    title: 'Actor / Component',
+    subtitle: 'Actor、Component、注册、挂接、Spawn 和实例属性差异',
+    archTag: 'arch/actor_component',
+    techTags: ['Actor', 'Component', 'ActorComponent', 'SceneComponent', 'Blueprint', '蓝图组件', '组件化'],
+    previewTags: ['Actor', 'Component', 'Blueprint'],
+    strongKeywords: ['AActor', 'UActorComponent', 'USceneComponent', 'RegisterComponent', 'OnRegister', 'SpawnActor', '蓝图组件'],
+    semanticKeywords: ['RootComponent', 'ChildActor', 'AttachToComponent', 'PrimitiveComponent', '组件实例', '属性差异'],
+  },
+  {
+    id: 'gamemode_pawn_controller',
+    categoryId: 'game_framework',
+    groupLabel: '控制体系',
+    title: 'GameMode / Pawn / Controller',
+    subtitle: 'Pawn、Controller、HUD、PlayerState 和 Possess 控制链路',
+    archTag: 'arch/gamemode_pawn_controller',
+    techTags: ['GameMode', 'Pawn', 'PlayerController', 'AIController', 'HUD', 'PlayerState'],
+    previewTags: ['Pawn', 'Controller', 'HUD'],
+    strongKeywords: ['AGameMode', 'APawn', 'APlayerController', 'AAIController', 'AHUD', 'PlayerState'],
+    semanticKeywords: ['Possess', 'UnPossess', 'Spectator', '输入控制'],
+  },
+  {
+    id: 'gameplay_systems',
+    categoryId: 'game_framework',
+    groupLabel: '玩法系统',
+    title: '玩法逻辑 / 数据系统',
+    subtitle: '战斗、任务、角色、数值配置和 Gameplay 业务层',
+    archTag: 'arch/gameplay_systems',
+    techTags: ['GameplayLogic', 'QuestSystem', '战斗系统', '角色系统', '任务系统', '数值配置', 'DataTable'],
+    previewTags: ['Gameplay', 'Quest', 'Data'],
+    strongKeywords: ['GameplayLogic', 'QuestSystem', '战斗系统', '任务系统', '角色系统', '数值配置', 'DataTable'],
+    semanticKeywords: ['技能', '装备', '背包', '属性', '副本', '关卡逻辑'],
+  },
+  {
+    id: 'rendering_pipeline',
+    categoryId: 'rendering_scene_perf',
+    groupLabel: '渲染主线',
+    title: '渲染管线 / Renderer',
+    subtitle: 'Renderer、ViewFamily、BasePass、RHI 和移动端渲染路径',
+    archTag: 'arch/rendering_pipeline',
+    techTags: ['Rendering', 'Renderer', '渲染管线', 'RHI', 'ViewFamily', 'BasePass', 'RenderThread', '移动端渲染'],
+    previewTags: ['Renderer', 'RHI', 'BasePass'],
+    strongKeywords: ['FSceneRenderer', 'DeferredShading', 'ForwardShading', 'RenderThread', 'ViewFamily', 'RHIThread', 'BasePass'],
+    semanticKeywords: ['渲染管线', '移动端渲染', 'DrawCall', 'RenderPass', 'D3D11', 'OpenGL', 'Vulkan'],
+  },
+  {
+    id: 'visibility_culling',
+    categoryId: 'rendering_scene_perf',
+    groupLabel: '可见性',
+    title: '可见性 / 裁剪 / FSOC',
+    subtitle: 'CullDistanceVolume、遮挡剔除、FSOC、bounds 和可见性判定',
+    archTag: 'arch/visibility_culling',
+    techTags: ['CullDistanceVolume', '遮挡剔除', 'FSOC', 'Visibility Culling', 'CanBeOccluded', 'MaxDrawDistance', 'Bounds'],
+    previewTags: ['CullDistance', 'FSOC', 'Bounds'],
+    strongKeywords: ['CullDistanceVolume', 'MaxDrawDistance', 'CachedMaxDrawDistance', 'CanBeOccluded', 'FSOC', 'Visibility Culling'],
+    semanticKeywords: ['遮挡剔除', '距离裁剪', 'bounds', '可见性', 'Occluder', '地形缝隙'],
+  },
+  {
+    id: 'mesh_lod_hism',
+    categoryId: 'rendering_scene_perf',
+    groupLabel: '网格提交',
+    title: 'StaticMesh / LOD / HISM',
+    subtitle: 'StaticMesh LOD、HISM/ISM、Instancing、Section 和 Material Slot',
+    archTag: 'arch/mesh_lod_hism',
+    techTags: ['StaticMesh', 'LOD', 'HLOD', 'HISM', 'ISM', 'InstancedStaticMesh', 'Section', 'Material Slot'],
+    previewTags: ['StaticMesh', 'HISM', 'LOD'],
+    strongKeywords: ['FStaticMeshLODResources', 'FLODInfo', 'HISM', 'ISM', 'HierarchicalInstancedStaticMesh', 'InstancedStaticMesh', 'Material Slot'],
+    semanticKeywords: ['LODResources', 'SelectionGroup', 'hardware instancing', 'ScreenSize', 'Dithered LOD', 'section draw'],
+  },
+  {
+    id: 'terrain_foliage',
+    categoryId: 'rendering_scene_perf',
+    groupLabel: '场景资源',
+    title: 'Terrain / Foliage / RVT',
+    subtitle: 'Landscape、Foliage、RVT、地形草和场景资源生成缓存',
+    archTag: 'arch/terrain_foliage',
+    techTags: ['Landscape', 'Foliage', 'Terrain', 'RVT', 'VirtualTexture', '地形草', 'InstancedFoliageActor'],
+    previewTags: ['Landscape', 'Foliage', 'RVT'],
+    strongKeywords: ['Landscape', 'Foliage', 'InstancedFoliageActor', 'VirtualTexture', 'RuntimeVirtualTexture', 'RVT'],
+    semanticKeywords: ['地形草', 'Spline Mesh', 'grass.Enable', 'FoliageType', '地形', 'Terrain'],
+  },
+  {
+    id: 'render_debug_profile',
+    categoryId: 'rendering_scene_perf',
+    groupLabel: '诊断分析',
+    title: 'FrameAnalysis / RenderDoc / Profiling',
+    subtitle: 'FrameAnalysis、RenderDoc、ScenePerfMonitor、热力图和性能定位',
+    archTag: 'arch/render_debug_profile',
+    techTags: ['FrameAnalysis', 'RenderDoc', 'ScenePerfMonitor', 'Heatmap', '性能分析', 'MemReport', 'SimpleCsvProfiler'],
+    previewTags: ['FrameAnalysis', 'RenderDoc', 'ScenePerf'],
+    strongKeywords: ['FrameAnalysis', 'RenderDoc', 'ScenePerfMonitor', 'SimpleCsvProfiler', 'MemReport', 'RHIThread DrawIndexedPrimitive'],
+    semanticKeywords: ['热力图', 'COS 上传', 'GPU Profiling', 'UI drawcall', '线程瓶颈', 'GameThread', 'RenderThread'],
+  },
+  {
+    id: 'material_shader_postprocess',
+    categoryId: 'vfx_sequence',
+    groupLabel: '视觉材质',
+    title: 'Material / Shader / PostProcess',
+    subtitle: '材质、Shader、后处理、DebugView 与视觉效果渲染',
+    archTag: 'arch/material_shader_postprocess',
+    techTags: ['Material', 'Shader', 'Lighting', 'PostProcess', 'DebugView', '材质球', '后处理'],
+    previewTags: ['Material', 'Shader', 'PostProcess'],
+    strongKeywords: ['MaterialInstance', 'HLSL', 'Shader', 'PostProcess', 'DebugView', '材质球'],
+    semanticKeywords: ['贴图', '采样器', 'ShadowMap', 'Decal', 'RayTracing'],
+  },
+  {
+    id: 'particles_vfx',
+    categoryId: 'vfx_sequence',
+    groupLabel: '粒子特效',
+    title: 'Cascade / Niagara / VFX',
+    subtitle: 'Cascade、Niagara、粒子系统、Quad Overdraw 和特效调试',
+    archTag: 'arch/particles_vfx',
+    techTags: ['Cascade', 'Niagara', 'VFXProfiler', '粒子系统', 'ParticleSystem', 'Overdraw', '特效编辑器'],
+    previewTags: ['Cascade', 'Niagara', 'Overdraw'],
+    strongKeywords: ['Cascade', 'Niagara', 'VFXProfiler', 'ParticleSystem', 'Quad Overdraw', '粒子系统'],
+    semanticKeywords: ['Baker', 'Debugger', 'Emitter', 'Spawnable', '特效', '移动端预览'],
+  },
+  {
+    id: 'sequencer_cinematic',
+    categoryId: 'vfx_sequence',
+    groupLabel: '序列动画',
+    title: 'Sequencer / LevelSequence',
+    subtitle: 'Sequencer、LevelSequence、Spawnable、采样链路和 CineCamera',
+    archTag: 'arch/sequencer_cinematic',
+    techTags: ['Sequencer', 'LevelSequence', 'MovieScene', 'Spawnable', 'CineCamera', 'VFXProfiler'],
+    previewTags: ['Sequencer', 'LevelSequence', 'Spawnable'],
+    strongKeywords: ['LevelSequence', 'Sequencer', 'UMovieSceneSequence', 'FSequencer', 'FMovieSceneSpawnRegister', 'CineCamera'],
+    semanticKeywords: ['Spawnable', '采样链路', 'MovieScene', 'Sequence', '镜头', '中间态崩溃'],
+  },
+  {
+    id: 'slate_editor_ui',
+    categoryId: 'vfx_sequence',
+    groupLabel: '编辑器 UI',
+    title: 'Slate / Editor UI',
+    subtitle: 'Slate、UMG、编辑器面板、回调状态和交互 UI',
+    archTag: 'arch/slate_editor_ui',
+    techTags: ['Slate', 'UMG', 'Widget', 'SWidget', 'UUserWidget', 'Editor UI', 'UI界面'],
+    previewTags: ['Slate', 'UMG', 'Widget'],
+    strongKeywords: ['Slate', 'SWidget', 'UUserWidget', 'UMG', 'Widget', 'Editor UI'],
+    semanticKeywords: ['Layout', 'PanelWidget', 'EventRouting', '回调', '编辑器面板', 'UI drawcall'],
+  },
+  {
+    id: 'ue_python_editor_tools',
+    categoryId: 'tools_automation',
+    groupLabel: '编辑器自动化',
+    title: 'UE Python / Editor Tools',
+    subtitle: 'UE Python、资产导入导出、P4 checkout、编辑器工具和 TA 流程',
+    archTag: 'arch/ue_python_editor_tools',
+    techTags: ['Python', 'UE Python', 'UnrealEnginePython', 'Editor', '编辑器工具', 'TA Tools', 'P4'],
+    previewTags: ['Python', 'Editor', 'P4'],
+    strongKeywords: ['UnrealEnginePython', 'ue.editor_get_selected_actors', 'factory_import_object', 'P4 checkout', '编辑器工具'],
+    semanticKeywords: ['资产导入', '导出', '蓝图资产', 'TA Tools', '工具面板', 'Python API'],
+  },
+  {
+    id: 'build_packaging',
+    categoryId: 'tools_automation',
+    groupLabel: '构建发布',
+    title: 'Build / Pak / HotPatch',
+    subtitle: 'UBT、BKDist、Pak、HotPatch、Shader 编译和构建排障',
+    archTag: 'arch/build_packaging',
+    techTags: ['UBT', 'Build', 'Pak', 'HotPatch', 'Cook', 'BKDist', 'ShaderCompile', 'Android SO'],
+    previewTags: ['UBT', 'Pak', 'Cook'],
+    strongKeywords: ['UBT', 'BKDist', 'Pak', 'HotPatch', 'CookAndPakAsset', 'Shader 编译', 'libUE4.so'],
+    semanticKeywords: ['构建系统', '编译开关', '补丁前缀', '打包', 'APK', 'AndroidInject'],
+  },
+  {
+    id: 'local_tooling_workflow',
+    categoryId: 'tools_automation',
+    groupLabel: '本地工具链',
+    title: '本地工具 / 仓库工作流',
+    subtitle: 'Git、Submodule、WOA Git、Codex、CodeBuddy、脚本运行器和工具配置',
+    archTag: 'arch/local_tooling_workflow',
+    techTags: ['Git', 'Submodule', 'WOA Git', 'Codex', 'CodeBuddy', 'CLI', 'Tooling', '工具配置'],
+    previewTags: ['Git', 'Codex', 'CLI'],
+    strongKeywords: ['Submodule', 'WOA Git', 'Codex CLI', 'CodeBuddy', 'buddycn.cmd', 'git.woa.com'],
+    semanticKeywords: ['仓库同步', 'External Tool', 'feature flag', '权限', '脚本运行器', '配置'],
+  },
+  {
+    id: 'cpu_multithread',
+    categoryId: 'runtime_platform',
+    groupLabel: '调度',
+    title: 'CPU / 多线程 / TaskGraph',
+    subtitle: 'TaskGraph、线程、异步、锁和 CPU 性能分析',
+    archTag: 'arch/cpu_multithread',
+    techTags: ['CPU', '多线程', 'Thread', 'TaskGraph', 'Async', '性能分析', 'FRunnable'],
+    previewTags: ['CPU', 'Thread', 'Async'],
+    strongKeywords: ['TaskGraph', 'FRunnable', 'TaskGraphSystem', 'Thread', '多线程', 'AsyncTask'],
+    semanticKeywords: ['Lock', 'Mutex', 'WorkerThread', 'CPUProfiler', 'UnrealInsights', '线程瓶颈'],
+  },
+  {
+    id: 'memory_storage',
+    categoryId: 'runtime_platform',
+    groupLabel: '内存资源',
+    title: 'Memory / GC / Asset Storage',
+    subtitle: 'GC、序列化、AssetRegistry、BuildData、PakFile 和资源加载',
+    archTag: 'arch/memory_storage',
+    techTags: ['Memory', 'GC', '垃圾回收', 'Serialization', 'AssetRegistry', 'BuildData', 'DataManager', 'PakFile'],
+    previewTags: ['GC', 'AssetRegistry', 'PakFile'],
+    strongKeywords: ['GarbageCollection', 'UObjectGC', 'FArchive', 'AssetRegistry', 'BuildData', 'FTieredBuildDataManager'],
+    semanticKeywords: ['序列化', '资源加载', 'StreamableManager', 'UPackage', '内存', 'World 级 BuildData'],
+  },
+  {
+    id: 'android_platform',
+    categoryId: 'runtime_platform',
+    groupLabel: '移动平台',
+    title: 'Android / Mobile Platform',
+    subtitle: 'Android、adb、OpenGL ES、移动端预览、平台指令和设备调试',
+    archTag: 'arch/android_platform',
+    techTags: ['Android', 'adb', 'OpenGL', 'ES31', 'Mobile', 'AndroidPlatform', 'RenderDoc'],
+    previewTags: ['Android', 'adb', 'Mobile'],
+    strongKeywords: ['Android', 'adb broadcast', 'ES31', 'AndroidPlatform', 'OpenGL', 'RenderDoc'],
+    semanticKeywords: ['移动端', 'console command', 'Test 包', '设备调试', 'APK', 'JNI'],
+  },
+  {
+    id: 'networking_online',
+    categoryId: 'runtime_platform',
+    groupLabel: '网络运行',
+    title: 'Networking / Upload / Server',
+    subtitle: 'PacketWatermark、COS、Socket、TCP/UDP、服务器上传和在线服务',
+    archTag: 'arch/networking_online',
+    techTags: ['Networking', 'Socket', 'TCPIP', 'UDP', 'COS', 'PacketWatermark', 'Replication', 'RPC', 'ServerCloud'],
+    previewTags: ['Socket', 'COS', 'Packet'],
+    strongKeywords: ['PacketWatermark', 'FChaCha', 'Socket', 'TCPIP', 'UDP', 'COS', 'Replication', 'RPC'],
+    semanticKeywords: ['网络包', '水印', '上传', 'Manifest', 'ServerAddr', 'LocalServerAddr', '多人同步', 'NetDriver'],
+  },
+  {
+    id: 'agent_llm_architecture',
+    categoryId: 'ai_web_knowledge',
+    groupLabel: 'Agent',
+    title: 'Agent / LLM Architecture',
+    subtitle: 'Kimi CLI、MCP、Tool Loop、Flow、Runtime 和多模态消息结构',
+    archTag: 'arch/agent_llm_architecture',
+    techTags: ['Agent', 'LLM', 'Kimi CLI', 'kimi-cli', 'MCP', 'Tool Loop', 'OpenAI', 'DeepSeek'],
+    previewTags: ['Agent', 'LLM', 'MCP'],
+    strongKeywords: ['KimiSoul', 'kimi-cli', 'Tool Loop', 'MCP', 'DeepSeek', 'OpenAI SDK', 'Wire Turn'],
+    semanticKeywords: ['Flow', 'Runtime', 'checkpoint', 'ContentPart', 'Dynamic Injection', '多模态', 'completion'],
+  },
+  {
+    id: 'web_frontend_product',
+    categoryId: 'ai_web_knowledge',
+    groupLabel: 'Web',
+    title: 'Nuxt / Vue / Frontend',
+    subtitle: 'Nuxt、Vue、Element Plus、TypeScript、前端调试和本地 Web 工具',
+    archTag: 'arch/web_frontend_product',
+    techTags: ['Nuxt', 'Vue', 'Frontend', '前端工程', 'TypeScript', 'Element Plus', 'Node.js', 'Nitro'],
+    previewTags: ['Nuxt', 'Vue', 'TypeScript'],
+    strongKeywords: ['Nuxt', 'Vue', 'Element Plus', 'TypeScript', 'defineNitroPlugin', 'AsyncLocalStorage'],
+    semanticKeywords: ['前端调试', '表格', '横向滚动条', 'iframe', 'Node.js', '服务端插件'],
+  },
+  {
+    id: 'knowledge_management',
+    categoryId: 'ai_web_knowledge',
+    groupLabel: 'Knowledge',
+    title: '知识管理 / 可视化',
+    subtitle: 'Knowledge Cards、Mermaid、NotebookLM、知识卡片资产和结构化笔记',
+    archTag: 'arch/knowledge_management',
+    techTags: ['知识管理', 'Knowledge Cards', 'knowledge-cards', 'Mermaid', 'NotebookLM', 'Obsidian'],
+    previewTags: ['Obsidian', 'Mermaid', 'Cards'],
+    strongKeywords: ['knowledge-cards', 'Knowledge Cards', 'Obsidian', 'NotebookLM', 'Mermaid'],
+    semanticKeywords: ['知识卡片', '图表', '资产本地化', '预览图', '结构化知识', '卡片墙'],
+  },
+]
+
+const selectedKnowledgeHomeCategoryId = ref(KNOWLEDGE_HOME_CATEGORIES[0]?.id || '')
+const selectedKnowledgeSubcategory = ref<KnowledgeSubcategory | null>(null)
+const selectedKnowledgeSubcategorySearchText = ref('')
+const knowledgeSubcategoryById = new Map(KNOWLEDGE_SUBCATEGORIES.map(item => [item.id, item]))
+
+const normalizedText = (value: string) => value.toLowerCase().replace(/\s+/g, '')
+const textIncludes = (text: string, keyword: string) => Boolean(keyword) && text.includes(keyword.toLowerCase())
+
+function scoreKnowledgeSubcategory(card: KnowledgeCard, subcategory: KnowledgeSubcategory) {
+  const title = (card.title || '').toLowerCase()
+  const domain = (card.domain || '').toLowerCase()
+  const summary = (card.summary || '').toLowerCase()
+  const content = (card.content || '').toLowerCase()
+  const tags = (card.tags || []).map(tag => tag.toLowerCase())
+  const domainAndTags = `${domain} ${tags.join(' ')}`
+  let score = 0
+
+  const archTag = subcategory.archTag.toLowerCase()
+  const hasAbsoluteTag = tags.some(tag => tag === archTag || tag.startsWith(`${archTag}/`))
+  if (hasAbsoluteTag) score += 100
+
+  for (const tag of subcategory.techTags.map(item => item.toLowerCase())) {
+    if (!tag) continue
+    if (tags.includes(tag)) score += 8
+    if (domain.includes(tag)) score += 5
+    if (title.includes(tag)) score += 4
+    if (summary.includes(tag)) score += 2
+  }
+
+  if (normalizedText(title).includes(normalizedText(subcategory.title))) score += 8
+
+  for (const keyword of subcategory.strongKeywords.map(item => item.toLowerCase())) {
+    if (textIncludes(title, keyword)) score += 9
+    else if (textIncludes(domainAndTags, keyword)) score += 7
+    else if (textIncludes(summary, keyword)) score += 5
+    else if (textIncludes(content, keyword)) score += 2.5
+  }
+
+  for (const keyword of subcategory.semanticKeywords.map(item => item.toLowerCase())) {
+    if (textIncludes(title, keyword)) score += 4
+    else if (textIncludes(domainAndTags, keyword)) score += 3
+    else if (textIncludes(summary, keyword)) score += 1.5
+    else if (textIncludes(content, keyword)) score += 0.6
+  }
+
+  return { score, hasAbsoluteTag }
+}
+
+const knowledgeCardSubcategoryMapping = computed<Record<string, string[]>>(() => {
+  const mapping: Record<string, string[]> = {}
+
+  for (const card of cards.value) {
+    const scores = KNOWLEDGE_SUBCATEGORIES
+      .map(subcategory => ({ id: subcategory.id, ...scoreKnowledgeSubcategory(card, subcategory) }))
+      .sort((a, b) => b.score - a.score)
+
+    const absolute = scores.filter(item => item.hasAbsoluteTag).map(item => item.id)
+    if (absolute.length > 0) {
+      mapping[card.id] = absolute
+      continue
+    }
+
+    const valid = scores.filter(item => item.score >= 6)
+    if (valid.length === 0) {
+      mapping[card.id] = []
+      continue
+    }
+
+    const bestScore = valid[0].score
+    mapping[card.id] = valid
+      .filter(item => item.score === bestScore || (bestScore >= 14 && bestScore - item.score <= 4))
+      .slice(0, 2)
+      .map(item => item.id)
+  }
+
+  return mapping
+})
+
+function getKnowledgeSubcategoryCards(subcategory: KnowledgeSubcategory) {
+  return cards.value.filter(card => (knowledgeCardSubcategoryMapping.value[card.id] || []).includes(subcategory.id))
+}
+
+const knowledgeSubcategoryCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const subcategory of KNOWLEDGE_SUBCATEGORIES) {
+    counts[subcategory.id] = getKnowledgeSubcategoryCards(subcategory).length
+  }
+  return counts
+})
+
+const knowledgeCategoryCardIdSets = computed(() => {
+  const sets: Record<string, Set<string>> = {}
+  for (const category of KNOWLEDGE_HOME_CATEGORIES) sets[category.id] = new Set<string>()
+  for (const card of cards.value) {
+    for (const subcategoryId of knowledgeCardSubcategoryMapping.value[card.id] || []) {
+      const subcategory = knowledgeSubcategoryById.get(subcategoryId)
+      if (subcategory) sets[subcategory.categoryId]?.add(card.id)
+    }
+  }
+  return sets
+})
+
+const knowledgeHomeMatchedCardCount = computed(() => {
+  return cards.value.filter(card => (knowledgeCardSubcategoryMapping.value[card.id] || []).length > 0).length
+})
+
+const knowledgeHomeCategoryStats = computed(() => {
+  return KNOWLEDGE_HOME_CATEGORIES.map(category => {
+    const subcategories = KNOWLEDGE_SUBCATEGORIES.filter(item => item.categoryId === category.id)
+    return {
+      ...category,
+      cardCount: knowledgeCategoryCardIdSets.value[category.id]?.size || 0,
+      subcategoryCount: subcategories.length,
+      matchedSubcategoryCount: subcategories.filter(item => (knowledgeSubcategoryCounts.value[item.id] || 0) > 0).length,
+    }
+  })
+})
+
+const selectedKnowledgeHomeCategory = computed(() => {
+  return knowledgeHomeCategoryStats.value.find(item => item.id === selectedKnowledgeHomeCategoryId.value) || knowledgeHomeCategoryStats.value[0] || null
+})
+
+const selectedKnowledgeSubcategoryStats = computed(() => {
+  return KNOWLEDGE_SUBCATEGORIES
+    .filter(item => item.categoryId === selectedKnowledgeHomeCategoryId.value)
+    .map(item => ({ ...item, cardCount: knowledgeSubcategoryCounts.value[item.id] || 0 }))
+})
+
+const selectedKnowledgeSubcategoryCategory = computed(() => {
+  if (!selectedKnowledgeSubcategory.value) return null
+  return KNOWLEDGE_HOME_CATEGORIES.find(item => item.id === selectedKnowledgeSubcategory.value?.categoryId) || null
+})
+
+const selectedKnowledgeSubcategoryFilteredCards = computed(() => {
+  if (!selectedKnowledgeSubcategory.value) return []
+  const baseCards = getKnowledgeSubcategoryCards(selectedKnowledgeSubcategory.value)
+  const needle = selectedKnowledgeSubcategorySearchText.value.trim().toLowerCase()
+  if (!needle) return baseCards
+  return baseCards.filter(card => {
+    const searchable = `${card.title} ${card.domain} ${card.summary} ${(card.tags || []).join(' ')}`.toLowerCase()
+    return searchable.includes(needle)
+  })
+})
+
+const selectedKnowledgeSubcategoryTotalCount = computed(() => {
+  if (!selectedKnowledgeSubcategory.value) return 0
+  return knowledgeSubcategoryCounts.value[selectedKnowledgeSubcategory.value.id] || 0
+})
+
+function selectKnowledgeHomeCategory(category: KnowledgeHomeCategory) {
+  selectedKnowledgeHomeCategoryId.value = category.id
+  selectedKnowledgeSubcategory.value = null
+  selectedKnowledgeSubcategorySearchText.value = ''
+}
+
+function selectKnowledgeSubcategory(subcategory: KnowledgeSubcategory) {
+  selectedKnowledgeSubcategory.value = subcategory
+  selectedKnowledgeSubcategorySearchText.value = ''
+}
+
+function exploreKnowledgeSubcategoryInCardsView() {
+  if (!selectedKnowledgeSubcategory.value) return
+  searchText.value = selectedKnowledgeSubcategory.value.title
+  activeView.value = 'cards'
+}
 const vaultPath = ref('')
 const lastSyncTime = ref('')
 const knowledgeStats = ref<KnowledgeStats>({ total: 0, cards: 0, mocs: 0, hubs: 0, maps: 0 })
@@ -965,6 +1580,10 @@ const filteredCards = computed(() => {
     }
     return true
   })
+})
+
+const headerCardCount = computed(() => {
+  return activeView.value === 'architecture' ? knowledgeHomeMatchedCardCount.value : filteredCards.value.length
 })
 
 const graphTypeCounts = computed(() => {
@@ -1344,6 +1963,143 @@ async function submitCreateCard() {
   }
 }
 
+const zoomMermaidVisible = ref(false)
+const zoomMermaidHtml = ref('')
+const lightboxScale = ref(1)
+const lightboxOffset = ref({ x: 0, y: 0 })
+let isDraggingLightbox = false
+let dragStartLightbox = { x: 0, y: 0, offsetX: 0, offsetY: 0 }
+
+function closeZoomMermaid() {
+  zoomMermaidVisible.value = false
+  zoomMermaidHtml.value = ''
+}
+
+function setupLightboxZoomPan() {
+  lightboxScale.value = 1
+  lightboxOffset.value = { x: 0, y: 0 }
+
+  const container = document.querySelector('.kc-mermaid-lightbox-body') as HTMLElement
+  const svg = container?.querySelector('svg') as SVGElement
+  if (!svg) return
+
+  svg.removeAttribute('width')
+  svg.removeAttribute('height')
+  svg.style.width = '100%'
+  svg.style.height = '100%'
+  svg.style.maxWidth = 'none'
+  svg.style.maxHeight = 'none'
+  svg.style.transformOrigin = 'center center'
+  svg.style.transition = 'none'
+
+  const updateTransform = () => {
+    svg.style.transform = `translate(${lightboxOffset.value.x}px, ${lightboxOffset.value.y}px) scale(${lightboxScale.value})`
+  }
+
+  container.addEventListener('wheel', (e: WheelEvent) => {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? -0.1 : 0.1
+    lightboxScale.value = Math.min(6, Math.max(0.15, lightboxScale.value + delta))
+    updateTransform()
+  }, { passive: false })
+
+  container.addEventListener('mousedown', (e: MouseEvent) => {
+    isDraggingLightbox = true
+    container.style.cursor = 'grabbing'
+    dragStartLightbox = {
+      x: e.clientX,
+      y: e.clientY,
+      offsetX: lightboxOffset.value.x,
+      offsetY: lightboxOffset.value.y
+    }
+  })
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (!isDraggingLightbox) return
+    lightboxOffset.value = {
+      x: dragStartLightbox.offsetX + (e.clientX - dragStartLightbox.x),
+      y: dragStartLightbox.offsetY + (e.clientY - dragStartLightbox.y)
+    }
+    updateTransform()
+  }
+
+  const onMouseUp = () => {
+    isDraggingLightbox = false
+    if (container) container.style.cursor = 'grab'
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+
+  watch(zoomMermaidVisible, (visible) => {
+    if (!visible) {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  })
+}
+
+if (typeof window !== 'undefined') {
+  (window as any).zoomMermaid = (el: HTMLElement) => {
+    const svg = el.querySelector('svg')
+    if (!svg) return
+
+    zoomMermaidHtml.value = svg.outerHTML
+    zoomMermaidVisible.value = true
+
+    nextTick(() => {
+      setupLightboxZoomPan()
+    })
+  }
+}
+
+const loadMermaid = () => {
+  return new Promise<any>((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve(null)
+      return
+    }
+    if ((window as any).mermaid) {
+      resolve((window as any).mermaid)
+      return
+    }
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js'
+    script.onload = () => {
+      const m = (window as any).mermaid
+      m.initialize({
+        startOnLoad: false,
+        theme: 'dark', // 高科技暗黑主题，完美相配！
+        securityLevel: 'loose',
+        themeVariables: {
+          primaryColor: '#60cdff',
+          primaryTextColor: '#fff',
+          lineColor: '#555',
+        }
+      })
+      resolve(m)
+    }
+    document.head.appendChild(script)
+  })
+}
+
+async function renderMermaidDiagrams() {
+  await nextTick()
+  try {
+    const m = await loadMermaid()
+    setTimeout(() => {
+      const elements = document.querySelectorAll('.kc-mermaid-container .mermaid')
+      if (elements.length > 0 && m) {
+        m.run({
+          nodes: Array.from(elements)
+        })
+      }
+    }, 120)
+  } catch (e) {
+    console.error('Failed to render mermaid diagram:', e)
+  }
+}
+
 // Open card detail
 async function openCard(card: KnowledgeCard) {
   selectedCard.value = card
@@ -1358,6 +2114,7 @@ async function openCard(card: KnowledgeCard) {
     const data = await $fetch<{ markdown: string }>(`/api/knowledge/${encodeURIComponent(card.id)}`)
     cardRawMarkdown.value = data.markdown || ''
     cardContentHtml.value = markdownToHtml(data.markdown)
+    void renderMermaidDiagrams()
   } catch {
     cardRawMarkdown.value = ''
     cardContentHtml.value = '<p>加载内容失败</p>'
@@ -1412,6 +2169,7 @@ async function saveCardEdit() {
     editingCardMarkdown.value = cardRawMarkdown.value
     cardContentHtml.value = markdownToHtml(cardRawMarkdown.value)
     editingCard.value = false
+    void renderMermaidDiagrams()
 
     await refreshCards()
     if (activeView.value === 'graph') await refreshGraph()
@@ -2173,7 +2931,7 @@ function onDragLeave(_e: DragEvent) {
 async function onDropFiles(e: DragEvent) {
   isDragOver.value = false
   if (importSubmitting.value) return
-  
+
   const dt = e.dataTransfer
   if (!dt) return
 
@@ -2188,7 +2946,7 @@ async function onDropFiles(e: DragEvent) {
       }
     }
   }
-  
+
   const mdFiles: { filename: string; content: string }[] = []
   for (const file of rawFiles) {
     if (file.name.toLowerCase().endsWith('.md')) {
@@ -2449,17 +3207,113 @@ function renderInlineMarkdown(text: string): string {
   return rendered.replace(/@@KC_TOKEN_(\d+)@@/g, (_m, index) => tokens[Number(index)] || '')
 }
 
+function parseMarkdownTables(htmlText: string): string {
+  const lines = htmlText.split('\n')
+  const result: string[] = []
+  let inTable = false
+  let tableHeaders: string[] = []
+  let tableAlignments: ('left' | 'center' | 'right' | '')[] = []
+  let tableRows: string[][] = []
+
+  const parseRow = (line: string) => {
+    const trimmed = line.trim()
+    const content = trimmed.replace(/^\|/, '').replace(/\|$/, '')
+    return content.split('|').map(cell => cell.trim())
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] || ''
+    const trimmed = line.trim()
+
+    const isTableRow = trimmed.startsWith('|') && trimmed.endsWith('|')
+
+    if (isTableRow) {
+      if (!inTable) {
+        const nextLine = lines[i + 1] ? lines[i + 1]!.trim() : ''
+        const isNextAlignRow = nextLine.startsWith('|') && nextLine.endsWith('|') && nextLine.replace(/[|:\s-]/g, '') === ''
+
+        if (isNextAlignRow) {
+          inTable = true
+          tableHeaders = parseRow(line)
+          const alignCells = parseRow(nextLine)
+          tableAlignments = alignCells.map(cell => {
+            const hasLeft = cell.startsWith(':')
+            const hasRight = cell.endsWith(':')
+            if (hasLeft && hasRight) return 'center'
+            if (hasRight) return 'right'
+            if (hasLeft) return 'left'
+            return ''
+          })
+          tableRows = []
+          i++
+          continue
+        }
+      } else {
+        tableRows.push(parseRow(line))
+        continue
+      }
+    }
+
+    if (inTable && !isTableRow) {
+      result.push(renderHtmlTable(tableHeaders, tableAlignments, tableRows))
+      inTable = false
+    }
+
+    if (!inTable) {
+      result.push(line)
+    }
+  }
+
+  if (inTable) {
+    result.push(renderHtmlTable(tableHeaders, tableAlignments, tableRows))
+  }
+
+  return result.join('\n')
+}
+
+function renderHtmlTable(headers: string[], alignments: string[], rows: string[][]): string {
+  let html = '<div class="kc-table-wrapper"><table>'
+
+  html += '<thead><tr>'
+  headers.forEach((h, idx) => {
+    const align = alignments[idx] ? ` style="text-align: ${alignments[idx]}"` : ''
+    html += `<th${align}>${renderInlineMarkdown(h)}</th>`
+  })
+  html += '</tr></thead>'
+
+  html += '<tbody>'
+  rows.forEach(row => {
+    html += '<tr>'
+    for (let idx = 0; idx < headers.length; idx++) {
+      const cell = row[idx] || ''
+      const align = alignments[idx] ? ` style="text-align: ${alignments[idx]}"` : ''
+      html += `<td${align}>${renderInlineMarkdown(cell)}</td>`
+    }
+    html += '</tr>'
+  })
+  html += '</tbody></table></div>'
+  return html
+}
+
 // Simple Markdown -> HTML
 function markdownToHtml(md: string): string {
   if (!md) return ''
   const codeBlocks: string[] = []
   let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
-    const l = escapeHtml(lang || 'text')
+    const l = (lang || 'text').trim().toLowerCase()
+    if (l === 'mermaid') {
+      const token = `@@KC_BLOCK_${codeBlocks.length}@@`
+      codeBlocks.push(`<div class="kc-mermaid-container" onclick="window.zoomMermaid(this)"><div class="kc-mermaid-zoom-badge">🔍 点击全屏放大图表</div><pre class="mermaid">${escapeHtml(code.trim())}</pre></div>`)
+      return token
+    }
     const escaped = escapeHtml(code.trim())
     const token = `@@KC_BLOCK_${codeBlocks.length}@@`
-    codeBlocks.push(`<pre><code class="language-${l}">${escaped}</code></pre>`)
+    codeBlocks.push(`<pre><code class="language-${escapeHtml(l)}">${escaped}</code></pre>`)
     return token
   })
+
+  // 解析并生成超高精表格
+  html = parseMarkdownTables(html)
 
   html = html.replace(/!\[\[([^\]]+)\]\]/g, (_m, path) => renderKnowledgeImage(path))
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt, path) => renderKnowledgeImage(path, alt))
@@ -2513,6 +3367,7 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
+// 强制触发 chokidar 文件系统监听器刷新 - 知识分类导航入口已就绪
 onMounted(() => {
   refreshCards()
   void refreshDefaultImportDirectoryState()
@@ -2521,6 +3376,27 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Mermaid 流程图样式 */
+.kc-mermaid-container {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  padding: 24px 16px;
+  margin: 18px 0;
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  min-height: 80px;
+}
+
+.kc-mermaid-container .mermaid {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: center;
+  background: transparent !important;
+}
+
 .kc-body {
   display: flex;
   flex: 1;
@@ -3052,7 +3928,7 @@ onMounted(() => {
   border: 1px solid var(--border-card);
   border-radius: var(--radius-lg);
   width: 100%;
-  max-width: 800px;
+  max-width: 1600px;
   max-height: 85vh;
   overflow-y: auto;
   padding: 32px;
@@ -3117,7 +3993,7 @@ onMounted(() => {
 }
 
 .kc-create-modal {
-  max-width: 900px;
+  max-width: 1600px;
 }
 
 .kc-create-hint {
@@ -3505,5 +4381,568 @@ onMounted(() => {
 .kc-dedup-item.duplicate .kc-dedup-label {
   background: rgba(231, 76, 60, 0.15);
   color: #e74c3c;
+}
+
+/* ==================== Markdown 高端表格与图表动效 ==================== */
+
+/* Fluent-like Markdown Table Styles */
+.kc-modal-body :deep(.kc-table-wrapper) {
+  width: 100%;
+  overflow-x: auto;
+  margin: 20px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-card);
+  background: rgba(20, 20, 20, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(8px);
+}
+.kc-modal-body :deep(.kc-table-wrapper table) {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.kc-modal-body :deep(.kc-table-wrapper th) {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-weight: 600;
+  padding: 12px 16px;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+.kc-modal-body :deep(.kc-table-wrapper td) {
+  padding: 12px 16px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.kc-modal-body :deep(.kc-table-wrapper tr:last-child td) {
+  border-bottom: none;
+}
+.kc-modal-body :deep(.kc-table-wrapper tr:hover td) {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-primary);
+}
+
+/* Mermaid Zoom & Pan Lightbox */
+.kc-mermaid-lightbox {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(8, 8, 8, 0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.kc-mermaid-lightbox-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.kc-mermaid-lightbox-close {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 10002;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.kc-mermaid-lightbox-close:hover {
+  background: rgba(255, 99, 132, 0.15);
+  color: var(--danger);
+  transform: rotate(90deg);
+}
+.kc-mermaid-lightbox-body {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: grab;
+  padding: 60px;
+}
+.kc-mermaid-lightbox-body:active {
+  cursor: grabbing;
+}
+.kc-mermaid-lightbox-body svg {
+  max-width: 90vw;
+  max-height: 85vh;
+  transition: transform 0.05s ease-out;
+  transform-origin: center center;
+}
+.kc-mermaid-lightbox-hint {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 8px 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  pointer-events: none;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  z-index: 10001;
+  letter-spacing: 0.5px;
+}
+
+/* Card inner Mermaid interactive hint */
+.kc-modal-body :deep(.mermaid) {
+  position: relative;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin: 16px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+.kc-modal-body :deep(.mermaid):hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--accent-default);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+}
+.kc-modal-body :deep(.mermaid)::after {
+  content: '🔍 点击全屏放大图表 (支持缩放平移)';
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  font-size: 11px;
+  color: var(--accent-default);
+  background: rgba(96, 205, 255, 0.12);
+  padding: 4px 10px;
+  border-radius: 12px;
+  opacity: 0.3;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  font-weight: 500;
+}
+.kc-modal-body :deep(.mermaid):hover::after {
+  opacity: 1;
+}
+
+/* ==================== 知识分类导航样式 ==================== */
+.kc-knowledge-view {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #141414;
+}
+
+.kc-knowledge-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  border-right: 1px solid var(--divider);
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+}
+
+.kc-knowledge-overview {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-md);
+  background: rgba(0,0,0,0.18);
+}
+
+.kc-knowledge-overview strong {
+  color: var(--text-primary);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.kc-knowledge-overview span:last-child {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.kc-knowledge-overline {
+  color: var(--category-accent, var(--accent-default));
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kc-knowledge-category {
+  --category-accent: var(--accent-default);
+  width: 100%;
+  text-align: left;
+  color: var(--text-secondary);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: rgba(255,255,255,0.025);
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, transform 0.18s;
+}
+
+.kc-knowledge-category:hover,
+.kc-knowledge-category.active {
+  border-color: rgba(255,255,255,0.09);
+  border-left-color: var(--category-accent);
+  background: rgba(255,255,255,0.05);
+  transform: translateY(-1px);
+}
+
+.kc-knowledge-category-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kc-knowledge-category-title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.kc-knowledge-category-count {
+  min-width: 32px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #111;
+  background: var(--category-accent);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.kc-knowledge-category p {
+  margin: 8px 0 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.kc-knowledge-category-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.kc-knowledge-main {
+  display: grid;
+  grid-template-columns: minmax(420px, 0.95fr) minmax(360px, 1.05fr);
+  gap: 18px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.kc-knowledge-category-panel,
+.kc-subcategory-detail {
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius-lg);
+  background: rgba(255,255,255,0.025);
+}
+
+.kc-knowledge-category-panel {
+  --category-accent: var(--accent-default);
+  padding: 20px;
+}
+
+.kc-knowledge-panel-header,
+.kc-subcategory-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.kc-knowledge-panel-header h2,
+.kc-subcategory-detail-header h3 {
+  margin: 4px 0 6px;
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.kc-subcategory-detail-header h3 {
+  font-size: 22px;
+}
+
+.kc-knowledge-panel-header p,
+.kc-subcategory-detail-header p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.kc-knowledge-panel-count {
+  min-width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+}
+
+.kc-knowledge-panel-count strong {
+  color: var(--text-primary);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.kc-knowledge-panel-count span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.kc-subcategory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.kc-subcategory-card {
+  position: relative;
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  text-align: left;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: rgba(18,18,18,0.58);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: transform 0.18s, border-color 0.18s, background 0.18s;
+}
+
+.kc-subcategory-card:hover,
+.kc-subcategory-card.active {
+  transform: translateY(-2px);
+  border-color: var(--category-accent, var(--accent-default));
+  background: rgba(28,28,28,0.78);
+}
+
+.kc-subcategory-card-top,
+.kc-subcategory-result-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.kc-subcategory-card-top strong {
+  color: #111;
+  background: var(--category-accent, var(--accent-default));
+  border-radius: 999px;
+  min-width: 28px;
+  padding: 2px 7px;
+  text-align: center;
+}
+
+.kc-subcategory-card h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.kc-subcategory-card p {
+  margin: 0;
+  flex: 1;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.kc-subcategory-signals,
+.kc-subcategory-result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.kc-subcategory-signals span,
+.kc-subcategory-result-tags span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 5px;
+  padding: 2px 7px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.kc-subcategory-card:hover .kc-arch-card-glow {
+  opacity: 1;
+}
+
+.kc-subcategory-card > *:not(.kc-arch-card-glow) {
+  position: relative;
+  z-index: 1;
+}
+
+.kc-subcategory-detail {
+  padding: 18px;
+}
+
+.kc-subcategory-detail.empty {
+  display: grid;
+  place-items: center;
+}
+
+.kc-subcategory-detail-actions {
+  width: min(320px, 42%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.kc-subcategory-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.kc-subcategory-result {
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: rgba(255,255,255,0.025);
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, transform 0.18s;
+}
+
+.kc-subcategory-result:hover {
+  transform: translateY(-1px);
+  border-color: rgba(96,205,255,0.25);
+  background: rgba(255,255,255,0.045);
+}
+
+.kc-subcategory-result h4 {
+  margin: 8px 0 5px;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.kc-subcategory-result p {
+  margin: 0 0 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.kc-subcategory-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 220px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.kc-subcategory-empty.large {
+  min-height: 360px;
+}
+
+.kc-subcategory-empty strong {
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.kc-subcategory-empty span {
+  max-width: 360px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 1180px) {
+  .kc-knowledge-view {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .kc-knowledge-main {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .kc-knowledge-category-panel,
+  .kc-subcategory-detail {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  .kc-knowledge-view {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .kc-knowledge-categories {
+    border-right: 0;
+    border-bottom: 1px solid var(--divider);
+    overflow: visible;
+  }
+
+  .kc-knowledge-main {
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .kc-knowledge-panel-header,
+  .kc-subcategory-detail-header {
+    flex-direction: column;
+  }
+
+  .kc-subcategory-detail-actions {
+    width: 100%;
+  }
 }
 </style>

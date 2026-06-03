@@ -48,6 +48,14 @@ export type GeneratedPakPair = {
   sourceSigName: string
 }
 
+export type LocalPakFile = {
+  name: string
+  path: string
+  size: number
+  mtimeMs: number
+  hasSig: boolean
+}
+
 export type PakPushPayload = {
   tempPaksDir: string
   targetPakName: string
@@ -64,6 +72,35 @@ export type PakPushPlan = GeneratedPakPair & {
   steps: PakCommandStep[]
 }
 
+export type PakPushSource = {
+  pakPath: string
+  targetPakName?: string
+}
+
+export type PakPushFile = {
+  pakPath: string
+  sigPath?: string
+  sourcePakName: string
+  sourceSigName?: string
+  targetPakName: string
+  targetSigName?: string
+  hasSig: boolean
+}
+
+export type PakPushFilesPayload = {
+  sources: PakPushSource[]
+  packageName?: string
+  gameName?: string
+  deviceSerial?: string
+}
+
+export type PakPushFilesPlan = {
+  files: PakPushFile[]
+  remoteDir: string
+  remoteTempDir: string
+  steps: PakCommandStep[]
+}
+
 export type RemotePakVersion = {
   fileName: string
   version: string
@@ -75,6 +112,19 @@ export type RemotePakVersionSummary = {
   latestVersion: string
   pakFiles: string[]
   versions: RemotePakVersion[]
+}
+
+export type RemotePakDeletePayload = {
+  fileNames: string[]
+  packageName?: string
+  gameName?: string
+  deviceSerial?: string
+}
+
+export type RemotePakDeletePlan = {
+  fileNames: string[]
+  remoteDir: string
+  steps: PakCommandStep[]
 }
 
 const normalizeWindowsPath = (value: string, fallback: string) => {
@@ -106,6 +156,20 @@ export const normalizePakBaseName = (rawName: string) => {
     throw new Error('pak 名称缺少版本或用途后缀')
   }
   return `${DEFAULT_PATCH_PREFIX}${suffix}`
+}
+
+export const normalizeRemotePakFileName = (rawName: string) => {
+  const trimmed = String(rawName || '').trim()
+  if (!trimmed) {
+    throw new Error('pak 名称不能为空')
+  }
+  if (/[\\/]/.test(trimmed) || trimmed.includes('..')) {
+    throw new Error('pak 名称不能包含路径分隔符或 ..')
+  }
+  if (!trimmed.toLowerCase().endsWith('.pak') || /[<>:"|?*]/.test(trimmed)) {
+    throw new Error('只能删除合法的 .pak 文件名')
+  }
+  return trimmed
 }
 
 export const buildAndroidSavedPaksDir = (
@@ -252,48 +316,159 @@ export const findLatestGeneratedPakPair = (tempPaksDir: string): GeneratedPakPai
   }
 }
 
-export const createPakPushPlan = (payload: PakPushPayload): PakPushPlan => {
-  const pair = findLatestGeneratedPakPair(payload.tempPaksDir)
-  const targetBaseName = normalizePakBaseName(payload.targetPakName)
-  const targetPakName = `${targetBaseName}.pak`
-  const targetSigName = `${targetBaseName}.sig`
+export const listLocalPakFiles = (directory: string): LocalPakFile[] => {
+  const resolvedDirectory = normalizeWindowsPath(directory, '')
+  if (!resolvedDirectory || !fs.existsSync(resolvedDirectory) || !fs.statSync(resolvedDirectory).isDirectory()) {
+    throw new Error(`Pak 目录不存在：${resolvedDirectory || directory}`)
+  }
+
+  return fs.readdirSync(resolvedDirectory)
+    .filter((name) => name.toLowerCase().endsWith('.pak'))
+    .map((name) => {
+      const pakPath = path.join(resolvedDirectory, name)
+      const pakStat = fs.statSync(pakPath)
+      const sourceBaseName = name.replace(/\.pak$/i, '')
+      return {
+        name,
+        path: pakPath,
+        size: pakStat.size,
+        mtimeMs: pakStat.mtimeMs,
+        hasSig: fs.existsSync(path.join(resolvedDirectory, `${sourceBaseName}.sig`)),
+      }
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs || left.name.localeCompare(right.name))
+}
+
+const resolvePakPushFile = (source: PakPushSource): PakPushFile => {
+  const pakPath = normalizeWindowsPath(source.pakPath, '')
+  if (!pakPath || !fs.existsSync(pakPath) || !fs.statSync(pakPath).isFile()) {
+    throw new Error(`Pak 文件不存在：${source.pakPath}`)
+  }
+  if (!pakPath.toLowerCase().endsWith('.pak')) {
+    throw new Error(`不是 .pak 文件：${pakPath}`)
+  }
+
+  const sourcePakName = path.basename(pakPath)
+  const sourceBaseName = sourcePakName.replace(/\.pak$/i, '')
+  const sigPath = path.join(path.dirname(pakPath), `${sourceBaseName}.sig`)
+  const targetBaseName = normalizePakBaseName(source.targetPakName || sourcePakName)
+  const hasSig = fs.existsSync(sigPath)
+
+  return {
+    pakPath,
+    sigPath: hasSig ? sigPath : undefined,
+    sourcePakName,
+    sourceSigName: hasSig ? `${sourceBaseName}.sig` : undefined,
+    targetPakName: `${targetBaseName}.pak`,
+    targetSigName: hasSig ? `${targetBaseName}.sig` : undefined,
+    hasSig,
+  }
+}
+
+const appendInstallSteps = (
+  steps: PakCommandStep[],
+  deviceArgs: string[],
+  localPath: string,
+  remoteDir: string,
+  remoteTempDir: string,
+  targetName: string,
+) => {
+  const remoteTempPath = `${remoteTempDir}/${targetName}`
+  const remoteTargetPath = `${remoteDir}/${targetName}`
+  steps.push(
+    {
+      name: `Push ${targetName} to adb temp`,
+      cmd: 'adb',
+      args: [...deviceArgs, 'push', localPath, remoteTempPath],
+    },
+    createRemoveRemoteTargetStep(deviceArgs, remoteTargetPath, targetName),
+    createInstallFromTempStep(deviceArgs, remoteTempPath, remoteTargetPath, targetName),
+    createRemoveTempStep(deviceArgs, remoteTempPath, targetName),
+  )
+}
+
+export const createPakPushFilesPlan = (payload: PakPushFilesPayload): PakPushFilesPlan => {
+  const files = payload.sources.map(resolvePakPushFile)
+  if (!files.length) {
+    throw new Error('请选择至少一个 Pak 文件')
+  }
+
+  const seenTargets = new Set<string>()
+  for (const file of files) {
+    const key = file.targetPakName.toLowerCase()
+    if (seenTargets.has(key)) {
+      throw new Error(`推送目标名重复：${file.targetPakName}`)
+    }
+    seenTargets.add(key)
+  }
+
   const remoteDir = buildAndroidSavedPaksDir(payload.packageName, payload.gameName)
   const remoteTempDir = '/data/local/tmp/cgtools-pak-push'
-  const remoteTempPakPath = `${remoteTempDir}/${targetPakName}`
-  const remoteTempSigPath = `${remoteTempDir}/${targetSigName}`
-  const remotePakPath = `${remoteDir}/${targetPakName}`
-  const remoteSigPath = `${remoteDir}/${targetSigName}`
   const deviceArgs = payload.deviceSerial?.trim() ? ['-s', payload.deviceSerial.trim()] : []
+  const steps: PakCommandStep[] = [
+    {
+      name: 'Create remote Saved/Paks directory',
+      cmd: 'adb',
+      args: [...deviceArgs, 'shell', 'mkdir', '-p', remoteDir, remoteTempDir],
+    },
+  ]
+
+  for (const file of files) {
+    appendInstallSteps(steps, deviceArgs, file.pakPath, remoteDir, remoteTempDir, file.targetPakName)
+    if (file.sigPath && file.targetSigName) {
+      appendInstallSteps(steps, deviceArgs, file.sigPath, remoteDir, remoteTempDir, file.targetSigName)
+    }
+  }
+
+  return {
+    files,
+    remoteDir,
+    remoteTempDir,
+    steps,
+  }
+}
+
+export const createPakPushPlan = (payload: PakPushPayload): PakPushPlan => {
+  const pair = findLatestGeneratedPakPair(payload.tempPaksDir)
+  const plan = createPakPushFilesPlan({
+    sources: [{ pakPath: pair.pakPath, targetPakName: payload.targetPakName }],
+    packageName: payload.packageName,
+    gameName: payload.gameName,
+    deviceSerial: payload.deviceSerial,
+  })
+  const file = plan.files[0]
 
   return {
     ...pair,
-    targetPakName,
-    targetSigName,
+    targetPakName: file.targetPakName,
+    targetSigName: file.targetSigName || `${file.targetPakName.replace(/\.pak$/i, '')}.sig`,
+    remoteDir: plan.remoteDir,
+    remoteTempDir: plan.remoteTempDir,
+    steps: plan.steps,
+  }
+}
+
+export const createRemotePakDeletePlan = (payload: RemotePakDeletePayload): RemotePakDeletePlan => {
+  const fileNames = payload.fileNames.map(normalizeRemotePakFileName)
+  if (!fileNames.length) {
+    throw new Error('请选择至少一个手机 Pak')
+  }
+
+  const remoteDir = buildAndroidSavedPaksDir(payload.packageName, payload.gameName)
+  const deviceArgs = payload.deviceSerial?.trim() ? ['-s', payload.deviceSerial.trim()] : []
+  const remoteTargets = fileNames.flatMap((fileName) => {
+    const sigName = `${fileName.replace(/\.pak$/i, '')}.sig`
+    return [`${remoteDir}/${fileName}`, `${remoteDir}/${sigName}`]
+  })
+
+  return {
+    fileNames,
     remoteDir,
-    remoteTempDir,
-    steps: [
-      {
-        name: 'Create remote Saved/Paks directory',
-        cmd: 'adb',
-        args: [...deviceArgs, 'shell', 'mkdir', '-p', remoteDir, remoteTempDir],
-      },
-      {
-        name: `Push ${targetPakName} to adb temp`,
-        cmd: 'adb',
-        args: [...deviceArgs, 'push', pair.pakPath, remoteTempPakPath],
-      },
-      createRemoveRemoteTargetStep(deviceArgs, remotePakPath, targetPakName),
-      createInstallFromTempStep(deviceArgs, remoteTempPakPath, remotePakPath, targetPakName),
-      createRemoveTempStep(deviceArgs, remoteTempPakPath, targetPakName),
-      {
-        name: `Push ${targetSigName} to adb temp`,
-        cmd: 'adb',
-        args: [...deviceArgs, 'push', pair.sigPath, remoteTempSigPath],
-      },
-      createRemoveRemoteTargetStep(deviceArgs, remoteSigPath, targetSigName),
-      createInstallFromTempStep(deviceArgs, remoteTempSigPath, remoteSigPath, targetSigName),
-      createRemoveTempStep(deviceArgs, remoteTempSigPath, targetSigName),
-    ],
+    steps: [{
+      name: `Delete ${fileNames.length} remote pak file(s)`,
+      cmd: 'adb',
+      args: [...deviceArgs, 'shell', 'rm', '-f', ...remoteTargets],
+    }],
   }
 }
 

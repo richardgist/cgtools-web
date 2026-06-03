@@ -11,12 +11,16 @@ import {
   buildPakToolPaths,
   buildPakToolPathsFromProjectRoot,
   buildAndroidSavedPaksDir,
+  createPakPushFilesPlan,
   createPakToolLaunchPlan,
+  createRemotePakDeletePlan,
   createPakPushPlan,
   extractRemotePakVersions,
   findLatestGeneratedPakPair,
   getPakToolStatus,
+  listLocalPakFiles,
   normalizePakBaseName,
+  normalizeRemotePakFileName,
   parsePakVersionFromName,
 } from '../pakToolPlus'
 
@@ -59,6 +63,9 @@ assert.equal(normalizePakBaseName('hotfix_test.pak'), 'tex_patch_hotfix_test')
 assert.equal(normalizePakBaseName('game_patch_1.37.0.21089.pak'), 'tex_patch_1.37.0.21089')
 assert.equal(normalizePakBaseName('tex_patch_ui_1.37.0.21089.pak'), 'tex_patch_ui_1.37.0.21089')
 assert.throws(() => normalizePakBaseName('../bad'), /pak 名称不能包含路径分隔符/)
+assert.equal(normalizeRemotePakFileName('tex_patch_ui_1.37.0.21089.pak'), 'tex_patch_ui_1.37.0.21089.pak')
+assert.throws(() => normalizeRemotePakFileName('../bad.pak'), /pak 名称不能包含路径分隔符/)
+assert.throws(() => normalizeRemotePakFileName('tex_patch_ui_1.37.0.21089.sig'), /只能删除合法的 .pak 文件名/)
 assert.equal(parsePakVersionFromName('game_patch_1.37.0.21089.pak'), '1.37.0.21089')
 assert.equal(parsePakVersionFromName('enc_036_bszg_1.37.0.23089.pak'), '1.37.0.23089')
 assert.equal(parsePakVersionFromName('game_patch_without_version.pak'), null)
@@ -92,18 +99,30 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cgtools-pak-push-'))
 const oldPak = path.join(tempDir, 'old_patch.pak')
 const newPak = path.join(tempDir, 'game_patch_0.0.0.0.pak')
 const newSig = path.join(tempDir, 'game_patch_0.0.0.0.sig')
+const extraPak = path.join(tempDir, 'ui_1.37.0.21089.pak')
 fs.writeFileSync(oldPak, 'old')
 fs.writeFileSync(newPak, 'pak')
 fs.writeFileSync(newSig, 'sig')
+fs.writeFileSync(extraPak, 'extra')
 const oldDate = new Date('2026-01-01T00:00:00Z')
 const newDate = new Date('2026-01-02T00:00:00Z')
 fs.utimesSync(oldPak, oldDate, oldDate)
 fs.utimesSync(newPak, newDate, newDate)
 fs.utimesSync(newSig, newDate, newDate)
+fs.utimesSync(extraPak, oldDate, oldDate)
 
 const latestPair = findLatestGeneratedPakPair(tempDir)
 assert.equal(latestPair.pakPath, newPak)
 assert.equal(latestPair.sigPath, newSig)
+
+const localPaks = listLocalPakFiles(tempDir)
+assert.deepEqual(localPaks.map((file) => file.name), [
+  'game_patch_0.0.0.0.pak',
+  'old_patch.pak',
+  'ui_1.37.0.21089.pak',
+])
+assert.equal(localPaks.find((file) => file.name === 'game_patch_0.0.0.0.pak')?.hasSig, true)
+assert.equal(localPaks.find((file) => file.name === 'ui_1.37.0.21089.pak')?.hasSig, false)
 
 const pushPlan = createPakPushPlan({
   tempPaksDir: tempDir,
@@ -134,3 +153,36 @@ assert.equal(pushPlan.steps.filter((step) => step.cmd === 'adb' && step.args.inc
 assert(pushPlan.steps
   .filter((step) => step.name.startsWith('Push '))
   .every((step) => String(step.args.at(-1)).startsWith(pushPlan.remoteTempDir)))
+
+const multiPushPlan = createPakPushFilesPlan({
+  sources: [
+    { pakPath: newPak, targetPakName: 'game_patch_0.0.0.0.pak' },
+    { pakPath: extraPak, targetPakName: 'ui_1.37.0.21089.pak' },
+  ],
+  packageName: DEFAULT_PACKAGE_NAME,
+  gameName: DEFAULT_GAME_NAME,
+})
+assert.equal(multiPushPlan.files.length, 2)
+assert.deepEqual(multiPushPlan.files.map((file) => file.targetPakName), [
+  'tex_patch_0.0.0.0.pak',
+  'tex_patch_ui_1.37.0.21089.pak',
+])
+assert.equal(multiPushPlan.files[0].hasSig, true)
+assert.equal(multiPushPlan.files[1].hasSig, false)
+assert.equal(multiPushPlan.steps.filter((step) => step.cmd === 'adb' && step.args.includes('push')).length, 3)
+assert.throws(() => createPakPushFilesPlan({
+  sources: [
+    { pakPath: newPak, targetPakName: 'game_patch_0.0.0.0.pak' },
+    { pakPath: newPak, targetPakName: 'tex_patch_0.0.0.0.pak' },
+  ],
+}), /推送目标名重复/)
+
+const deletePlan = createRemotePakDeletePlan({
+  fileNames: ['tex_patch_ui_1.37.0.21089.pak'],
+  packageName: DEFAULT_PACKAGE_NAME,
+  gameName: DEFAULT_GAME_NAME,
+  deviceSerial: 'DEVICE123',
+})
+assert.deepEqual(deletePlan.steps[0].args.slice(0, 4), ['-s', 'DEVICE123', 'shell', 'rm'])
+assert(deletePlan.steps[0].args.includes(`${deletePlan.remoteDir}/tex_patch_ui_1.37.0.21089.pak`))
+assert(deletePlan.steps[0].args.includes(`${deletePlan.remoteDir}/tex_patch_ui_1.37.0.21089.sig`))

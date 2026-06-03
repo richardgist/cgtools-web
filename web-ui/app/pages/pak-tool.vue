@@ -70,41 +70,6 @@
             </button>
             <button class="fluent-btn" :disabled="isLaunching" @click="resetDefault">恢复默认 Root</button>
           </div>
-          <div class="push-panel">
-            <div class="field-grid">
-              <div class="field-row">
-                <label>源 Pak</label>
-                <input :value="status?.latestGeneratedPak?.sourcePakName || '未找到生成的 pak'" class="fluent-input path-input" readonly />
-                <button class="fluent-btn sub" :disabled="!status?.detected?.tempPaksDirExists" @click="openPath(status?.tempPaksDir, 'folder')">打开目录</button>
-              </div>
-              <div class="field-row">
-                <label>手机文件名</label>
-                <input v-model="pakTargetName" class="fluent-input path-input" placeholder="例如 ui_1.37.0.12050.pak" />
-                <div class="inline-actions">
-                  <button class="fluent-btn sub" :disabled="!status?.latestGeneratedPak" @click="useSourcePakName">用源名称</button>
-                  <button class="fluent-btn sub" :disabled="!canFetchRemoteVersion" @click="fetchRemoteVersion">
-                    {{ isFetchingRemoteVersion ? '获取中' : '获取版本' }}
-                  </button>
-                </div>
-              </div>
-              <div class="field-row hint-row">
-                <span></span>
-                <div class="field-hint">推送时会固定补成 tex_patch_ 前缀；多个 pak 建议写成 tex_patch_用途_版本.pak，版本必须放最后。</div>
-              </div>
-              <div class="field-row">
-                <label>包名</label>
-                <input v-model="packageName" class="fluent-input path-input" placeholder="com.tencent.tmgp.pubgmhd" />
-                <input v-model="deviceSerial" class="fluent-input device-input" placeholder="设备 serial，可空" />
-              </div>
-              <div class="field-row">
-                <label>远端目录</label>
-                <input :value="remoteSavedPaksDir" class="fluent-input path-input" readonly />
-                <button class="fluent-btn primary" :disabled="!canPushPak" @click="pushRenamedPak">
-                  {{ isPushingPak ? '推送中' : '重命名并推送' }}
-                </button>
-              </div>
-            </div>
-          </div>
           <div class="status-grid">
             <div class="status-item" :class="status?.detected?.projectRootExists ? 'ok' : 'bad'">
               <span>Project Root</span>
@@ -123,6 +88,134 @@
               <strong>{{ status?.detected?.tempPaksDirExists ? 'ready' : 'after first run' }}</strong>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="fluent-card">
+        <div class="card-header">
+          <span>Pak 推送</span>
+          <div class="inline-actions">
+            <button class="fluent-btn sub" :disabled="!canFetchRemoteVersion" @click="fetchRemoteVersion">
+              {{ isFetchingRemoteVersion ? '获取中' : '获取版本' }}
+            </button>
+            <button class="fluent-btn sub" :disabled="isBusyWithPak" @click="clearPakSelections">清空选择</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="field-grid">
+            <div class="field-row">
+              <label>包名</label>
+              <input v-model="packageName" class="fluent-input path-input" placeholder="com.tencent.tmgp.pubgmhd" />
+              <input v-model="deviceSerial" class="fluent-input device-input" placeholder="设备 serial，可空" />
+            </div>
+            <div class="field-row">
+              <label>远端目录</label>
+              <input :value="remoteSavedPaksDir" class="fluent-input path-input" readonly />
+              <button class="fluent-btn sub" :disabled="isLoadingRemoteList || !packageName.trim()" @click="fetchRemotePakList">
+                {{ isLoadingRemoteList ? '读取中' : '读取手机列表' }}
+              </button>
+            </div>
+            <div class="field-row">
+              <label>单文件目标名</label>
+              <input v-model="pakTargetName" class="fluent-input path-input" placeholder="例如 tex_patch_ui_1.37.0.12050.pak" />
+              <div class="inline-actions">
+                <button class="fluent-btn sub" :disabled="!status?.latestGeneratedPak" @click="useSourcePakName">用源名称</button>
+              </div>
+            </div>
+            <div class="field-row hint-row">
+              <span></span>
+              <div class="field-hint">只选 1 个本地 Pak 时会使用上面的目标名；多选时按各自源文件名推送，并统一规范为 tex_patch_ 前缀。若同目录存在同名 .sig，会一起推送。</div>
+            </div>
+          </div>
+
+          <div class="push-layout">
+            <div class="push-column">
+              <div class="panel-title">
+                <span>直接拖拽推送</span>
+                <button class="fluent-btn sub" :disabled="!droppedFiles.length || isPushingDroppedPaks" @click="droppedFiles = []">清空</button>
+              </div>
+              <div
+                class="pak-drop-zone"
+                :class="{ active: isDragOver, disabled: isBusyWithPak }"
+                @dragover.prevent="onDragOver"
+                @dragleave.prevent="onDragLeave"
+                @drop.prevent="onDropPakFiles"
+              >
+                <div class="drop-mark">PAK</div>
+                <div class="drop-copy">
+                  <strong>{{ isDragOver ? '松开后加入推送列表' : '把 .pak 文件拖到这里' }}</strong>
+                  <span>可同时拖入多个 Pak；同名 .sig 一起拖入时会自动配对。</span>
+                </div>
+              </div>
+              <div class="pak-list compact-list" v-if="droppedPakFiles.length">
+                <div v-for="file in droppedPakFiles" :key="file.name" class="pak-list-row">
+                  <div class="pak-name">{{ file.name }}</div>
+                  <div class="pak-meta" :class="file.hasSig ? 'sig-ok' : 'sig-missing'">
+                    {{ file.hasSig ? '+sig' : 'no sig' }} · {{ formatBytes(file.size) }}
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-state">尚未拖入 Pak。</div>
+              <button class="fluent-btn primary full-width" :disabled="!canPushDroppedPaks" @click="pushDroppedPaks">
+                {{ isPushingDroppedPaks ? '推送中' : droppedPushButtonText }}
+              </button>
+            </div>
+
+            <div class="push-column">
+              <div class="panel-title">
+                <span>目录选择推送</span>
+                <div class="inline-actions">
+                  <button class="fluent-btn sub plus-btn" :disabled="isBusyWithPak" @click="pickPakDirectory">+</button>
+                  <button class="fluent-btn sub" :disabled="!localPakDirectory || isLoadingLocalPaks" @click="loadLocalPakDirectory">
+                    {{ isLoadingLocalPaks ? '扫描中' : '重扫' }}
+                  </button>
+                </div>
+              </div>
+              <div class="directory-line">
+                <span>{{ localPakDirectory || status?.tempPaksDir || '未选择目录' }}</span>
+              </div>
+              <div class="selection-tools">
+                <button class="fluent-btn sub" :disabled="!availableLocalPaks.length" @click="selectAllLocalPaks">全选</button>
+                <button class="fluent-btn sub" :disabled="!selectedLocalPakPaths.length" @click="selectedLocalPakPaths = []">取消</button>
+                <button class="fluent-btn sub" :disabled="!status?.latestGeneratedPak" @click="selectLatestGeneratedPak">选择最新生成</button>
+              </div>
+              <div class="pak-list selectable-list" v-if="availableLocalPaks.length">
+                <label v-for="file in availableLocalPaks" :key="file.path" class="pak-check-row">
+                  <input v-model="selectedLocalPakPaths" type="checkbox" :value="file.path" />
+                  <div class="pak-name">{{ file.name }}</div>
+                  <div class="pak-meta">{{ file.hasSig ? 'sig' : 'no sig' }}</div>
+                </label>
+              </div>
+              <div v-else class="empty-state">目录中没有可选 Pak。</div>
+              <button class="fluent-btn primary full-width" :disabled="!canPushSelectedLocalPaks" @click="pushSelectedLocalPaks">
+                {{ isPushingLocalPaks ? '推送中' : `推送选中的 ${selectedLocalPakFiles.length || 0} 个 Pak` }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="fluent-card">
+        <div class="card-header">
+          <span>手机 Pak 列表</span>
+          <div class="inline-actions">
+            <button class="fluent-btn sub" :disabled="isLoadingRemoteList || !packageName.trim()" @click="fetchRemotePakList">
+              {{ isLoadingRemoteList ? '读取中' : '刷新列表' }}
+            </button>
+            <button class="fluent-btn danger" :disabled="!canDeleteRemotePaks" @click="deleteSelectedRemotePaks">
+              {{ isDeletingRemotePaks ? '删除中' : `删除选中 ${selectedRemotePakNames.length || 0}` }}
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div v-if="remotePakFiles.length" class="remote-list">
+            <label v-for="name in remotePakFiles" :key="name" class="pak-check-row remote">
+              <input v-model="selectedRemotePakNames" type="checkbox" :value="name" />
+              <div class="pak-name">{{ name }}</div>
+              <div class="pak-meta">{{ parsePakVersion(name) || '-' }}</div>
+            </label>
+          </div>
+          <div v-else class="empty-state">还没有读取手机 Pak 列表。</div>
         </div>
       </section>
 
@@ -164,6 +257,19 @@ const pakTargetName = ref('tex_patch_0.0.0.0.pak')
 const packageName = ref(DEFAULT_PACKAGE_NAME)
 const deviceSerial = ref('')
 
+const isDragOver = ref(false)
+const droppedFiles = ref([])
+const localPakDirectory = ref('')
+const localPakFiles = ref([])
+const selectedLocalPakPaths = ref([])
+const remotePakFiles = ref([])
+const selectedRemotePakNames = ref([])
+const isLoadingLocalPaks = ref(false)
+const isPushingLocalPaks = ref(false)
+const isPushingDroppedPaks = ref(false)
+const isLoadingRemoteList = ref(false)
+const isDeletingRemotePaks = ref(false)
+
 const normalizeRoot = (value) => {
   const normalized = String(value || '').trim().replace(/\//g, '\\')
   if (!normalized) return DEFAULT_PROJECT_ROOT
@@ -177,14 +283,81 @@ const remoteSavedPaksDir = computed(() => {
   const resolvedPackageName = packageName.value.trim() || DEFAULT_PACKAGE_NAME
   return `/sdcard/Android/data/${resolvedPackageName}/files/UE4Game/${DEFAULT_GAME_NAME}/${DEFAULT_GAME_NAME}/Saved/Paks`
 })
-const canPushPak = computed(() => {
-  return !isPushingPak.value
-    && !!status.value?.latestGeneratedPak
-    && !!pakTargetName.value.trim()
-    && !!packageName.value.trim()
-})
 const canFetchRemoteVersion = computed(() => {
   return !isFetchingRemoteVersion.value
+    && !!packageName.value.trim()
+})
+const isBusyWithPak = computed(() => {
+  return isPushingPak.value
+    || isPushingLocalPaks.value
+    || isPushingDroppedPaks.value
+    || isDeletingRemotePaks.value
+})
+const latestGeneratedPakItem = computed(() => {
+  const latest = status.value?.latestGeneratedPak
+  if (!latest?.pakPath) return null
+  return {
+    name: latest.sourcePakName,
+    path: latest.pakPath,
+    size: 0,
+    mtimeMs: 0,
+    hasSig: true,
+    source: 'latest',
+  }
+})
+const availableLocalPaks = computed(() => {
+  const seen = new Set()
+  const result = []
+  const add = (file) => {
+    if (!file?.path) return
+    const key = file.path.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    result.push(file)
+  }
+  add(latestGeneratedPakItem.value)
+  for (const file of localPakFiles.value) add({ ...file, source: 'directory' })
+  return result
+})
+const selectedLocalPakFiles = computed(() => {
+  const selected = new Set(selectedLocalPakPaths.value.map((item) => String(item).toLowerCase()))
+  return availableLocalPaks.value.filter((file) => selected.has(file.path.toLowerCase()))
+})
+const droppedPakFiles = computed(() => {
+  const sigNames = new Set(
+    droppedFiles.value
+      .filter((file) => file.name.toLowerCase().endsWith('.sig'))
+      .map((file) => file.name.toLowerCase()),
+  )
+  return droppedFiles.value
+    .filter((file) => file.name.toLowerCase().endsWith('.pak'))
+    .map((file) => ({
+      name: file.name,
+      size: file.size,
+      hasSig: sigNames.has(`${file.name.replace(/\.pak$/i, '')}.sig`.toLowerCase()),
+    }))
+})
+const droppedSigCount = computed(() => droppedPakFiles.value.filter((file) => file.hasSig).length)
+const droppedPushButtonText = computed(() => {
+  const pakCount = droppedPakFiles.value.length || 0
+  const sigCount = droppedSigCount.value
+  return sigCount > 0
+    ? `推送拖拽的 ${pakCount} 个 Pak（含 ${sigCount} 个 sig）`
+    : `推送拖拽的 ${pakCount} 个 Pak`
+})
+const canPushSelectedLocalPaks = computed(() => {
+  return !isPushingLocalPaks.value
+    && selectedLocalPakFiles.value.length > 0
+    && !!packageName.value.trim()
+})
+const canPushDroppedPaks = computed(() => {
+  return !isPushingDroppedPaks.value
+    && droppedPakFiles.value.length > 0
+    && !!packageName.value.trim()
+})
+const canDeleteRemotePaks = computed(() => {
+  return !isDeletingRemotePaks.value
+    && selectedRemotePakNames.value.length > 0
     && !!packageName.value.trim()
 })
 
@@ -218,6 +391,19 @@ const getErrorMessage = (error, fallback = '未知错误') => {
   return error?.data?.statusMessage || error?.statusMessage || error?.message || fallback
 }
 
+const formatBytes = (value) => {
+  const size = Number(value || 0)
+  if (size <= 0) return '-'
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
+  return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+const parsePakVersion = (fileName) => {
+  const matches = [...String(fileName || '').matchAll(/(\d+\.\d+\.\d+\.\d+)/g)]
+  return matches.at(-1)?.[1] || ''
+}
+
 const refreshStatus = async () => {
   isRefreshing.value = true
   try {
@@ -238,7 +424,9 @@ const refreshStatus = async () => {
 
 const pickProjectRoot = async () => {
   try {
-    const res = await $fetch('/api/system/folder')
+    const res = await $fetch('/api/system/folder', {
+      query: { path: normalizedProjectRoot.value },
+    })
     if (res?.success && res.path) {
       projectRoot.value = res.path
       saveProjectRoot({ silent: true })
@@ -319,10 +507,10 @@ const fetchRemoteVersion = async () => {
     const selectedVersion = res.selectedVersion || res.latestVersion
     const selectedCount = Array.isArray(res.versions) ? res.versions.find((item) => item.version === selectedVersion)?.count : 0
     pakTargetName.value = applyVersionToPakName(pakTargetName.value, selectedVersion)
+    remotePakFiles.value = Array.isArray(res.pakFiles) ? res.pakFiles : []
     appendLog('info', `[version] 手机 ${res.remoteDir} 出现最多版本：${selectedVersion}（${selectedCount || '-'} 个 pak），已回填：${pakTargetName.value}\n`)
-    const pakFiles = Array.isArray(res.pakFiles) ? res.pakFiles : []
-    appendLog('info', pakFiles.length
-      ? `[version] 已读取到 ${pakFiles.length} 个 pak：\n${pakFiles.map((name) => `  ${name}`).join('\n')}\n`
+    appendLog('info', remotePakFiles.value.length
+      ? `[version] 已读取到 ${remotePakFiles.value.length} 个 pak：\n${remotePakFiles.value.map((name) => `  ${name}`).join('\n')}\n`
       : '[version] Saved/Paks 下没有读取到 pak 文件。\n')
   } catch (error) {
     appendLog('stderr', `[error] 获取手机版本失败：${getErrorMessage(error)}\n`)
@@ -337,30 +525,210 @@ const formatStepResult = (result) => {
   return `[step] ${result.name} exitCode=${result.code}${stdout}${stderr}\n`
 }
 
-const pushRenamedPak = async () => {
-  isPushingPak.value = true
+const appendPushResults = (res) => {
+  const files = Array.isArray(res.files) ? res.files : []
+  if (files.length) {
+    appendLog('info', `[push] ${files.length} 个 Pak -> ${res.remoteDir}\n${files.map((file) => `  ${file.sourcePakName} -> ${file.targetPakName}${file.hasSig ? ' (+sig)' : ''}`).join('\n')}\n`)
+  } else {
+    appendLog('info', `[push] ${res.sourcePakName} -> ${res.remoteDir}/${res.targetPakName}\n`)
+  }
+  for (const result of res.results || []) {
+    appendLog(result.code === 0 ? 'info' : 'stderr', formatStepResult(result))
+  }
+  appendLog(res.success ? 'info' : 'stderr', res.success ? '[push] 推送完成。\n' : `[push] 推送失败 exitCode=${res.exitCode}\n`)
+}
+
+const pushSelectedLocalPaks = async () => {
+  isPushingLocalPaks.value = true
   try {
-    const res = await $fetch('/api/pak-tool/push', {
+    const selected = selectedLocalPakFiles.value
+    const singleTargetName = selected.length === 1 ? pakTargetName.value : ''
+    const res = await $fetch('/api/pak-tool/push-files', {
       method: 'POST',
       body: {
-        projectRoot: normalizedProjectRoot.value,
-        targetPakName: pakTargetName.value,
+        files: selected.map((file) => ({
+          path: file.path,
+          targetPakName: singleTargetName || file.name,
+        })),
         packageName: packageName.value,
         gameName: DEFAULT_GAME_NAME,
         deviceSerial: deviceSerial.value,
       },
     })
 
-    appendLog('info', `[push] ${res.sourcePakName} -> ${res.remoteDir}/${res.targetPakName}\n`)
-    for (const result of res.results || []) {
-      appendLog(result.code === 0 ? 'info' : 'stderr', formatStepResult(result))
-    }
-    appendLog(res.success ? 'info' : 'stderr', res.success ? '[push] 推送完成。\n' : `[push] 推送失败 exitCode=${res.exitCode}\n`)
+    appendPushResults(res)
+    if (res.success) await fetchRemotePakList({ silent: true })
   } catch (error) {
     appendLog('stderr', `[error] 推送失败：${getErrorMessage(error)}\n`)
   } finally {
-    isPushingPak.value = false
+    isPushingLocalPaks.value = false
   }
+}
+
+const pushDroppedPaks = async () => {
+  isPushingDroppedPaks.value = true
+  try {
+    const form = new FormData()
+    for (const file of droppedFiles.value) {
+      if (/\.(pak|sig)$/i.test(file.name)) {
+        form.append('files', file, file.name)
+      }
+    }
+    form.append('packageName', packageName.value)
+    form.append('gameName', DEFAULT_GAME_NAME)
+    form.append('deviceSerial', deviceSerial.value)
+
+    const res = await $fetch('/api/pak-tool/push-upload', {
+      method: 'POST',
+      body: form,
+    })
+
+    appendPushResults(res)
+    if (res.success) {
+      droppedFiles.value = []
+      await fetchRemotePakList({ silent: true })
+    }
+  } catch (error) {
+    appendLog('stderr', `[error] 拖拽 Pak 推送失败：${getErrorMessage(error)}\n`)
+  } finally {
+    isPushingDroppedPaks.value = false
+  }
+}
+
+const pickPakDirectory = async () => {
+  try {
+    const res = await $fetch('/api/system/folder', {
+      query: { path: localPakDirectory.value || status.value?.tempPaksDir || normalizedProjectRoot.value },
+    })
+    if (res?.success && res.path) {
+      localPakDirectory.value = res.path
+      await loadLocalPakDirectory()
+    }
+  } catch (error) {
+    appendLog('stderr', `[error] 选择 Pak 目录失败：${getErrorMessage(error)}\n`)
+  }
+}
+
+const loadLocalPakDirectory = async () => {
+  const directory = localPakDirectory.value || status.value?.tempPaksDir
+  if (!directory) return
+  isLoadingLocalPaks.value = true
+  try {
+    const res = await $fetch('/api/pak-tool/local-paks', {
+      method: 'POST',
+      body: { directory },
+    })
+    localPakDirectory.value = res.directory || directory
+    localPakFiles.value = Array.isArray(res.files) ? res.files : []
+    selectedLocalPakPaths.value = selectedLocalPakPaths.value.filter((selectedPath) => {
+      return availableLocalPaks.value.some((file) => file.path.toLowerCase() === String(selectedPath).toLowerCase())
+    })
+    appendLog('info', `[local] ${localPakDirectory.value} 扫描到 ${localPakFiles.value.length} 个 Pak。\n`)
+  } catch (error) {
+    appendLog('stderr', `[error] 扫描 Pak 目录失败：${getErrorMessage(error)}\n`)
+  } finally {
+    isLoadingLocalPaks.value = false
+  }
+}
+
+const selectAllLocalPaks = () => {
+  selectedLocalPakPaths.value = availableLocalPaks.value.map((file) => file.path)
+}
+
+const selectLatestGeneratedPak = () => {
+  const latest = latestGeneratedPakItem.value
+  if (!latest) return
+  selectedLocalPakPaths.value = [latest.path]
+  pakTargetName.value = formatTexPatchName(latest.name)
+}
+
+const fetchRemotePakList = async (options = {}) => {
+  isLoadingRemoteList.value = true
+  try {
+    const res = await $fetch('/api/pak-tool/remote-list', {
+      method: 'POST',
+      body: {
+        packageName: packageName.value,
+        gameName: DEFAULT_GAME_NAME,
+        deviceSerial: deviceSerial.value,
+      },
+    })
+    remotePakFiles.value = Array.isArray(res.pakFiles) ? res.pakFiles : []
+    selectedRemotePakNames.value = selectedRemotePakNames.value.filter((name) => remotePakFiles.value.includes(name))
+    if (!options.silent) {
+      appendLog('info', `[remote] ${res.remoteDir} 读取到 ${remotePakFiles.value.length} 个 Pak。\n`)
+    }
+  } catch (error) {
+    appendLog('stderr', `[error] 读取手机 Pak 列表失败：${getErrorMessage(error)}\n`)
+  } finally {
+    isLoadingRemoteList.value = false
+  }
+}
+
+const deleteSelectedRemotePaks = async () => {
+  const fileNames = [...selectedRemotePakNames.value]
+  if (!fileNames.length) return
+  const confirmed = window.confirm(`确认删除手机 Saved/Paks 下的 ${fileNames.length} 个 Pak？同名 .sig 也会一起删除。`)
+  if (!confirmed) return
+
+  isDeletingRemotePaks.value = true
+  try {
+    const res = await $fetch('/api/pak-tool/delete-remote', {
+      method: 'POST',
+      body: {
+        fileNames,
+        packageName: packageName.value,
+        gameName: DEFAULT_GAME_NAME,
+        deviceSerial: deviceSerial.value,
+      },
+    })
+    for (const result of res.results || []) {
+      appendLog(result.code === 0 ? 'info' : 'stderr', formatStepResult(result))
+    }
+    appendLog(res.success ? 'info' : 'stderr', res.success
+      ? `[delete] 已删除 ${fileNames.length} 个 Pak 及同名 sig。\n`
+      : `[delete] 删除失败 exitCode=${res.exitCode}\n`)
+    selectedRemotePakNames.value = []
+    await fetchRemotePakList({ silent: true })
+  } catch (error) {
+    appendLog('stderr', `[error] 删除手机 Pak 失败：${getErrorMessage(error)}\n`)
+  } finally {
+    isDeletingRemotePaks.value = false
+  }
+}
+
+const onDragOver = () => {
+  if (!isBusyWithPak.value) {
+    isDragOver.value = true
+  }
+}
+
+const onDragLeave = () => {
+  isDragOver.value = false
+}
+
+const onDropPakFiles = (event) => {
+  isDragOver.value = false
+  if (isBusyWithPak.value) return
+  const incoming = Array.from(event.dataTransfer?.files || [])
+    .filter((file) => /\.(pak|sig)$/i.test(file.name))
+  if (!incoming.length) {
+    appendLog('stderr', '[drop] 没有识别到 .pak 或 .sig 文件。\n')
+    return
+  }
+
+  const byName = new Map(droppedFiles.value.map((file) => [file.name.toLowerCase(), file]))
+  for (const file of incoming) {
+    byName.set(file.name.toLowerCase(), file)
+  }
+  droppedFiles.value = [...byName.values()]
+  appendLog('info', `[drop] 已加入 ${incoming.length} 个文件，当前 ${droppedPakFiles.value.length} 个 Pak 待推送。\n`)
+}
+
+const clearPakSelections = () => {
+  droppedFiles.value = []
+  selectedLocalPakPaths.value = []
+  selectedRemotePakNames.value = []
 }
 
 const resetDefault = async () => {
@@ -450,6 +818,8 @@ onMounted(async () => {
   projectRoot.value = store.activeProjectRoot
   persistProjectRootStore(store.activeProjectRoot)
   await refreshStatus()
+  localPakDirectory.value = status.value?.tempPaksDir || ''
+  await loadLocalPakDirectory()
 })
 </script>
 
@@ -508,12 +878,6 @@ onMounted(async () => {
   display: inline-flex;
   gap: 6px;
   justify-content: flex-end;
-}
-
-.push-panel {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .device-input {
@@ -576,6 +940,191 @@ onMounted(async () => {
   color: #ff9aa4;
 }
 
+.push-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.push-column {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+  padding: 12px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pak-drop-zone {
+  display: flex;
+  min-height: 118px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px dashed rgba(127, 203, 255, 0.38);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(126, 203, 255, 0.08), rgba(121, 217, 138, 0.04)),
+    rgba(255, 255, 255, 0.016);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pak-drop-zone.active {
+  border-color: #79d98a;
+  background:
+    linear-gradient(135deg, rgba(121, 217, 138, 0.12), rgba(126, 203, 255, 0.08)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.pak-drop-zone.disabled {
+  opacity: 0.55;
+}
+
+.drop-mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border: 1px solid rgba(126, 203, 255, 0.32);
+  border-radius: 8px;
+  color: #7ecbff;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.drop-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.drop-copy strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.drop-copy span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.directory-line {
+  overflow: hidden;
+  min-height: 34px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selection-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.pak-list,
+.remote-list {
+  display: flex;
+  max-height: 260px;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  margin: 10px 0;
+  padding-right: 2px;
+}
+
+.compact-list {
+  max-height: 170px;
+}
+
+.pak-list-row,
+.pak-check-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pak-check-row {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  cursor: pointer;
+}
+
+.pak-check-row.remote {
+  grid-template-columns: 18px minmax(0, 1fr) 120px;
+}
+
+.pak-check-row input {
+  margin: 0;
+}
+
+.pak-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pak-meta {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pak-meta.sig-ok {
+  color: #79d98a;
+}
+
+.pak-meta.sig-missing {
+  color: #ffca7a;
+}
+
+.empty-state {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.full-width {
+  width: 100%;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.plus-btn {
+  min-width: 34px;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .terminal-wrap {
   min-height: 240px;
 }
@@ -600,9 +1149,28 @@ onMounted(async () => {
   color: #ff9aa4;
 }
 
-@media (max-width: 900px) {
-  .field-row {
+@media (max-width: 1180px) {
+  .push-layout {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .field-row,
+  .hint-row {
+    grid-template-columns: 1fr;
+  }
+
+  .device-input {
+    width: 100%;
+  }
+
+  .pak-check-row.remote {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .pak-check-row.remote .pak-meta {
+    display: none;
   }
 }
 </style>

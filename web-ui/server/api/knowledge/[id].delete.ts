@@ -9,10 +9,6 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, statusMessage: 'Missing card id' })
     }
 
-    if (!CARD_ID_PATTERN.test(id)) {
-        throw createError({ statusCode: 400, statusMessage: 'Invalid card id format' })
-    }
-
     const deleted = deleteKnowledgeCard(id)
     if (!deleted) {
         throw createError({ statusCode: 404, statusMessage: 'Card not found' })

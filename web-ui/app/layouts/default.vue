@@ -131,6 +131,20 @@
           <div class="nav-indicator"></div>
         </NuxtLink>
 
+        <NuxtLink to="/prompt" class="nav-item" exact-active-class="active" title="提示词管理">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19C5.03442 19.176 5.09912 19.431 5.02102 19.667L4.62991 20.854C4.50295 21.239 4.85305 21.602 5.23905 21.488L6.47391 21.124C6.70291 21.057 6.94991 21.11 7.12691 21.267C8.52891 21.744 10.2319 22 12 22Z"></path>
+              <circle cx="7.5" cy="10.5" r="1.5" fill="currentColor"></circle>
+              <circle cx="11.5" cy="7.5" r="1.5" fill="currentColor"></circle>
+              <circle cx="16.5" cy="9.5" r="1.5" fill="currentColor"></circle>
+              <circle cx="15.5" cy="14.5" r="1.5" fill="currentColor"></circle>
+            </svg>
+          </span>
+          <span class="nav-label">提示词管理</span>
+          <div class="nav-indicator"></div>
+        </NuxtLink>
+
         <div class="nav-separator"></div>
         <div class="nav-group-title">知识库</div>
 

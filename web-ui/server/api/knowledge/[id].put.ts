@@ -12,10 +12,6 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Missing card id' })
   }
 
-  if (!CARD_ID_PATTERN.test(id)) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid card id format' })
-  }
-
   const body = await readBody<UpdateKnowledgeCardBody>(event)
   const markdown = typeof body?.markdown === 'string' ? body.markdown : ''
   if (!markdown.trim()) {

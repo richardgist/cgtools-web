@@ -45,129 +45,7 @@
       </section>
 
       <div class="inspector-workbench">
-        <aside class="inspector-panel control-panel">
-          <div class="panel-title">Pick</div>
-          <div class="inspector-form">
-            <div class="form-row coordinate-form-row">
-              <div class="form-group coord-group">
-                <label>X 坐标</label>
-                <div class="coord-input-wrapper">
-                  <input v-model.number="screenX" class="fluent-input coord-input" type="number" />
-                  <div class="coord-adjusters-row">
-                    <button class="adjust-btn-micro" @click="adjustX(-100)" title="X轴 -100">-100</button>
-                    <button class="adjust-btn-micro" @click="adjustX(-10)" title="X轴 -10">-10</button>
-                    <button class="adjust-btn-micro" @click="adjustX(10)" title="X轴 +10">+10</button>
-                    <button class="adjust-btn-micro" @click="adjustX(100)" title="X轴 +100">+100</button>
-                  </div>
-                </div>
-              </div>
-              <div class="form-group coord-group">
-                <label>Y 坐标</label>
-                <div class="coord-input-wrapper">
-                  <input v-model.number="screenY" class="fluent-input coord-input" type="number" />
-                  <div class="coord-adjusters-row">
-                    <button class="adjust-btn-micro" @click="adjustY(-100)" title="Y轴 -100">-100</button>
-                    <button class="adjust-btn-micro" @click="adjustY(-10)" title="Y轴 -10">-10</button>
-                    <button class="adjust-btn-micro" @click="adjustY(10)" title="Y轴 +10">+10</button>
-                    <button class="adjust-btn-micro" @click="adjustY(100)" title="Y轴 +100">+100</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <button class="fluent-btn sub compact reset-center-btn" @click="resetCoordinates" title="重置屏幕拾取点至中心">
-              🎯 居中点选 (960, 540)
-            </button>
 
-            <div class="form-group">
-              <label>Trace Channel</label>
-              <select v-model="traceChannel" class="fluent-select">
-                <option>Visibility</option>
-                <option>Camera</option>
-                <option>WorldStatic</option>
-                <option>WorldDynamic</option>
-              </select>
-            </div>
-
-            <div class="toggle-row compact">
-              <label><input v-model="traceComplex" type="checkbox" /> Complex</label>
-              <label><input v-model="highlight" type="checkbox" /> Highlight</label>
-              <label><input v-model="ignoreSelf" type="checkbox" /> Ignore Self</label>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label>Thickness</label>
-                <input v-model.number="thickness" class="fluent-input" type="number" min="0.1" step="0.1" />
-              </div>
-              <div class="form-group">
-                <label>Color</label>
-                <input v-model="highlightColor" class="color-input" type="color" />
-              </div>
-            </div>
-
-            <div class="inspector-actions vertical">
-              <button class="fluent-btn primary" :disabled="loading" @click="pickAtScreen">Pick Actor</button>
-              <button class="fluent-btn" :disabled="loading" @click="getCurrentSelection">Current Selection</button>
-              <button class="fluent-btn" :disabled="loading || !selectionId" @click="getSelectionTree">Load Details</button>
-              <button class="fluent-btn danger" :disabled="loading" @click="clearHighlight">Clear Highlight</button>
-            </div>
-          </div>
-
-          <div class="selection-strip">
-            <span>Selection</span>
-            <strong>{{ selectionLabel }}</strong>
-          </div>
-
-          <div class="pick-readout">
-            <div class="pick-readout-header">
-              <span>当前点中对象</span>
-              <label class="pick-auto-toggle">
-                <input v-model="autoRefreshPick" type="checkbox" />
-                自动刷新
-              </label>
-            </div>
-
-            <template v-if="pickReadout">
-              <div class="pick-readout-primary">
-                <strong>{{ pickReadout.actorName }}</strong>
-                <em>#{{ pickReadout.selectionId ?? '-' }}</em>
-              </div>
-              <div class="pick-readout-meta">
-                <span>{{ pickReadout.source }}</span>
-                <span v-if="pickReadout.screenText">{{ pickReadout.screenText }}</span>
-                <span v-if="pickReadout.distanceText">{{ pickReadout.distanceText }}</span>
-                <span>{{ pickReadout.updatedAt }}</span>
-              </div>
-              <div class="pick-readout-grid">
-                <span>Actor Class</span>
-                <strong>{{ pickReadout.actorClass }}</strong>
-                <span>Component</span>
-                <strong>{{ pickReadout.componentName }}</strong>
-                <span>Component Class</span>
-                <strong>{{ pickReadout.componentClass }}</strong>
-                <span>Impact</span>
-                <strong>{{ pickReadout.impactText }}</strong>
-              </div>
-              <div class="pick-readout-path" :title="pickReadout.actorPath">
-                {{ pickReadout.actorPath }}
-              </div>
-            </template>
-
-            <div v-else class="pick-readout-empty">
-              {{ pickReadoutError || '还没有点选记录' }}
-            </div>
-          </div>
-
-          <div v-if="capabilityCommands.length" class="capability-box">
-            <div class="panel-title small">Capabilities</div>
-            <div class="capability-grid">
-              <div v-for="row in capabilityRows" :key="row.label">
-                <span>{{ row.label }}</span>
-                <strong>{{ row.value }}</strong>
-              </div>
-            </div>
-          </div>
-        </aside>
 
         <main class="actor-stage">
           <section class="actor-hero" :class="{ empty: !actorInfo }">
@@ -201,7 +79,7 @@
             </template>
             <template v-else>
               <h2>No Actor Selected</h2>
-              <p>Use Current Selection or Pick Actor to inspect runtime objects.</p>
+              <p>Use Pick Actor or Load Details to inspect runtime objects.</p>
             </template>
           </section>
 
@@ -421,7 +299,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 type InspectorObject = Record<string, any>
 type DisplayRow = {
@@ -461,6 +339,7 @@ const pickReadoutError = ref('')
 const pickReadoutPending = ref(false)
 const autoRefreshPick = ref(false)
 let pickPollTimer: ReturnType<typeof setInterval> | null = null
+let currentSelectionPollPending = false
 
 const screenX = ref(960)
 const screenY = ref(540)
@@ -469,7 +348,6 @@ const traceComplex = ref(true)
 const highlight = ref(true)
 const ignoreSelf = ref(false)
 const highlightColor = ref('#ffb800')
-const thickness = ref(2)
 
 // UX & Interaction Enhanced States
 const componentSearch = ref('')
@@ -502,7 +380,7 @@ const connectionLabel = computed(() => {
 
 const selectionLabel = computed(() => {
   if (!selectionId.value) return '未选中'
-  return `#${selectionId.value} ${selectionActor.value || ''}`
+  return `#${selectionId.value} ${shortTypeName(selectionActor.value) || ''}`
 })
 
 const responseData = computed(() => asObject(lastResponse.value?.data))
@@ -803,13 +681,15 @@ async function pickAtScreen() {
       ignoreSelf: ignoreSelf.value,
       highlight: highlight.value,
       color: colorToLinear(highlightColor.value),
-      thickness: Number(thickness.value),
     },
   })
   if (response?.ok && response?.data?.selectionId) {
     selectionId.value = response.data.selectionId
     selectionActor.value = response.data.actor?.pathName || response.data.actor?.name || ''
     updatePickReadoutFromResponse(response, '手动 Pick', pickScreen)
+    currentNodeId.value = null
+    propertyHistory.value = []
+    await getSelectionTree(Number(response.data.selectionId))
   }
 }
 
@@ -823,7 +703,60 @@ async function getCurrentSelection() {
   if (response?.ok && response?.data?.selectionId) {
     selectionId.value = response.data.selectionId
     selectionActor.value = response.data.actor?.pathName || response.data.actor?.name || ''
-    updatePickReadoutFromResponse(response, 'Current Selection')
+    updatePickReadoutFromResponse(response, '当前选中')
+  }
+  return response
+}
+
+async function loadCurrentDetails() {
+  const current = await getCurrentSelection()
+  const nextSelectionId = current?.ok && current?.data?.selectionId
+    ? Number(current.data.selectionId)
+    : selectionId.value
+
+  if (!nextSelectionId) return
+  selectionId.value = nextSelectionId
+  await getSelectionTree(nextSelectionId)
+}
+
+async function syncCurrentSelectionToDetails() {
+  if (currentSelectionPollPending) return
+  currentSelectionPollPending = true
+  try {
+    const response = await $fetch('/api/inspector/request', {
+      method: 'POST',
+      body: {
+        host: host.value,
+        port: Number(port.value),
+        timeoutMs: Number(timeoutMs.value),
+        request: {
+          version: 1,
+          id: makeRequestId('current'),
+          cmd: 'get_current_selection',
+          args: {},
+        },
+      },
+    }) as any
+
+    connectionState.value = response?.ok ? 'connected' : connectionState.value
+    if (!response?.ok || !response?.data?.selectionId) return
+
+    const nextSelectionId = Number(response.data.selectionId)
+    const selectionChanged = nextSelectionId !== selectionId.value
+    updateSelectionFromResponse(response)
+    updatePickReadoutFromResponse(response, '自动同步')
+
+    if (selectionChanged || !responseData.value?.properties) {
+      currentNodeId.value = null
+      propertyHistory.value = []
+      await getSelectionTree(nextSelectionId)
+    }
+  } catch (err: any) {
+    if (!pickReadout.value) {
+      pickReadoutError.value = err?.message || String(err)
+    }
+  } finally {
+    currentSelectionPollPending = false
   }
 }
 
@@ -863,13 +796,13 @@ async function refreshPickReadout() {
   }
 }
 
-async function getSelectionTree() {
-  if (!selectionId.value) return
+async function getSelectionTree(targetSelectionId = selectionId.value) {
+  if (!targetSelectionId) return
   await sendInspectorRequest({
     version: 1,
     id: makeRequestId('tree'),
     cmd: 'get_selection_tree',
-    args: { selectionId: selectionId.value, depth: 1, offset: 0, limit: 200 },
+    args: { selectionId: targetSelectionId, depth: 1, offset: 0, limit: 200 },
   })
 }
 
@@ -909,7 +842,6 @@ function fillLastPick() {
       traceComplex: traceComplex.value,
       highlight: highlight.value,
       color: colorToLinear(highlightColor.value),
-      thickness: Number(thickness.value),
     },
   }, null, 2)
 }
@@ -947,6 +879,15 @@ async function copyActorPath() {
   }
 }
 
+async function copyPickPath() {
+  if (pickReadout.value?.actorPath && pickReadout.value.actorPath !== '-') {
+    try {
+      await navigator.clipboard?.writeText(pickReadout.value.actorPath)
+      triggerCopySuccess('pickPath')
+    } catch (e) {}
+  }
+}
+
 async function copyPropertyPath(path: string) {
   if (path && path !== '-') {
     try {
@@ -971,11 +912,10 @@ function resetCoordinates() {
 }
 
 onMounted(() => {
+  syncCurrentSelectionToDetails()
   pickPollTimer = setInterval(() => {
-    if (autoRefreshPick.value) {
-      refreshPickReadout()
-    }
-  }, 1000)
+    syncCurrentSelectionToDetails()
+  }, 1500)
 })
 
 onBeforeUnmount(() => {
@@ -1632,7 +1572,7 @@ async function goBackProperty() {
 
 .inspector-workbench {
   display: grid;
-  grid-template-columns: minmax(260px, 300px) minmax(420px, 1fr) minmax(320px, 420px);
+  grid-template-columns: minmax(400px, 1fr) minmax(450px, 1.3fr);
   gap: 18px;
   align-items: stretch;
 }
@@ -1916,7 +1856,6 @@ async function goBackProperty() {
   overflow-wrap: anywhere;
 }
 
-.pick-readout-path,
 .pick-readout-empty {
   color: var(--text-secondary);
   font-family: var(--font-mono);
@@ -1928,6 +1867,55 @@ async function goBackProperty() {
 .pick-readout-path {
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 4px;
+}
+
+.clickable-path-tiny {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid transparent;
+  transition: all var(--transition-premium);
+}
+
+.clickable-path-tiny:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.clickable-path-tiny span:first-child {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.path-copy-tag-tiny {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  transition: all 250ms ease;
+}
+
+.clickable-path-tiny:hover .path-copy-tag-tiny {
+  background: rgba(45, 209, 159, 0.15);
+  color: #3ccf74;
+}
+
+.path-copy-tag-tiny.copied {
+  background: rgba(60, 207, 116, 0.15) !important;
+  color: #3ccf74 !important;
 }
 
 .capability-box {

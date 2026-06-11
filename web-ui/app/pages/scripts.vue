@@ -23,21 +23,51 @@
               <button :class="{ active: activeMode === 'console' }" @click="switchMode('console')">Console</button>
             </div>
           </div>
-          <div v-if="activeMode === 'script'" class="script-items">
-            <div v-if="scripts.length === 0" style="color: var(--text-secondary); padding: 16px; text-align: center;">暂无脚本</div>
-            <div 
-              v-else 
-              v-for="s in scripts" 
-              :key="s.path"
-              class="list-item" 
-              :class="{ active: selectedScript && selectedScript.path === s.path }"
-              :title="`右键打开所在文件夹：${s.path}`"
-              @click="selectScript(s)"
-              @contextmenu.prevent.stop="openLocalPathFolder(s.path)"
-            >
-              <span>{{ s.icon }}</span>
-              <span>{{ s.name }}</span>
-            </div>
+          <div v-if="activeMode === 'script'" class="script-items script-items-grouped">
+            <div v-if="scripts.length === 0" class="empty-hint">暂无脚本</div>
+            <template v-else>
+              <div class="script-column-grid">
+                <section v-for="group in scriptGroups.primary" :key="group.key" class="script-column">
+                  <div class="script-group-title">
+                    <span>{{ group.label }}</span>
+                    <span>{{ group.items.length }}</span>
+                  </div>
+                  <div class="script-column-items">
+                    <div v-if="group.items.length === 0" class="script-empty-line">暂无</div>
+                    <div
+                      v-for="s in group.items"
+                      :key="s.path"
+                      class="list-item script-list-item"
+                      :class="{ active: selectedScript && selectedScript.path === s.path }"
+                      :title="`右键打开所在文件夹：${s.path}`"
+                      @click="selectScript(s)"
+                      @contextmenu.prevent.stop="openLocalPathFolder(s.path)"
+                    >
+                      <span>{{ s.icon }}</span>
+                      <span class="script-item-name">{{ s.name }}</span>
+                    </div>
+                  </div>
+                </section>
+              </div>
+              <section v-if="scriptGroups.other.items.length" class="script-other-group">
+                <div class="script-group-title">
+                  <span>{{ scriptGroups.other.label }}</span>
+                  <span>{{ scriptGroups.other.items.length }}</span>
+                </div>
+                <div
+                  v-for="s in scriptGroups.other.items"
+                  :key="s.path"
+                  class="list-item script-list-item"
+                  :class="{ active: selectedScript && selectedScript.path === s.path }"
+                  :title="`右键打开所在文件夹：${s.path}`"
+                  @click="selectScript(s)"
+                  @contextmenu.prevent.stop="openLocalPathFolder(s.path)"
+                >
+                  <span>{{ s.icon }}</span>
+                  <span class="script-item-name">{{ s.name }}</span>
+                </div>
+              </section>
+            </template>
           </div>
           <div v-else class="script-items console-history-list">
             <div v-if="consoleHistoryGroups.length === 0" class="empty-hint">暂无命令历史</div>
@@ -721,6 +751,31 @@ const switchMode = (mode) => {
 
 const isCvarScript = (script) => String(script?.name || '').toLowerCase() === 'pull_cvar.bat'
 const isCvarScriptPath = (scriptPath) => /(^|[\\/])pull_cvar\.bat$/i.test(String(scriptPath || ''))
+const getScriptTransferGroupKey = (script) => {
+  const name = String(script?.name || '').toLowerCase()
+  if (/^pull[_-]/.test(name)) return 'pull'
+  if (/^push[_-]/.test(name)) return 'push'
+  return 'other'
+}
+const scriptGroups = computed(() => {
+  const grouped = {
+    pull: [],
+    push: [],
+    other: [],
+  }
+
+  for (const script of scripts.value) {
+    grouped[getScriptTransferGroupKey(script)].push(script)
+  }
+
+  return {
+    primary: [
+      { key: 'pull', label: 'Pull', items: grouped.pull },
+      { key: 'push', label: 'Push', items: grouped.push },
+    ],
+    other: { key: 'other', label: '其它', items: grouped.other },
+  }
+})
 const selectedScriptParams = computed(() => selectedScript.value?.params || [])
 const selectedScriptParamProjects = computed(() => {
   const key = getScriptParamKey(selectedScript.value)
@@ -1976,7 +2031,7 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 .page-grid {
   display: grid;
   min-width: 0;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 420px minmax(0, 1fr);
   gap: 24px;
   height: calc(100vh - 150px);
 }
@@ -2014,6 +2069,69 @@ watch([consolePackageName, consoleDeviceSerial, consoleRequireProcess, consoleCo
 .empty-hint {
   color: var(--text-secondary);
   padding: 16px;
+  text-align: center;
+}
+
+.script-items-grouped {
+  gap: 12px;
+}
+
+.script-column-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.script-column,
+.script-other-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.script-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 8px 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.script-column-items {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.script-list-item {
+  min-width: 0;
+  padding: 10px 8px;
+  gap: 8px;
+}
+
+.script-list-item.active {
+  padding-left: 16px;
+}
+
+.script-item-name {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-empty-line {
+  padding: 10px 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: 12px;
   text-align: center;
 }
 

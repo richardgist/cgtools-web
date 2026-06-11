@@ -5,7 +5,7 @@ export const DEFAULT_PROJECT_ROOT = 'E:\\CJGame\\trunk'
 export const DEFAULT_PAK_TOOL_EXE = 'E:\\CJGame\\trunk\\Survive\\Paktools\\CookAndPakAsset\\Do.bat'
 export const DEFAULT_PACKAGE_NAME = 'com.tencent.tmgp.pubgmhd'
 export const DEFAULT_GAME_NAME = 'ShadowTrackerExtra'
-export const DEFAULT_PATCH_PREFIX = 'tex_patch_'
+export const DEFAULT_PATCH_PREFIX = 'game_patch_'
 
 export type PakToolPaths = {
   projectRoot: string
@@ -92,6 +92,8 @@ export type PakPushFilesPayload = {
   packageName?: string
   gameName?: string
   deviceSerial?: string
+  remotePakFiles?: string[]
+  requireSig?: boolean
 }
 
 export type PakPushFilesPlan = {
@@ -127,6 +129,11 @@ export type RemotePakDeletePlan = {
   steps: PakCommandStep[]
 }
 
+const PATCH_NAME_PATTERN = /^(game|core|tex)_patch_(.+)$/i
+const KNOWN_PATCH_NAME_PATTERN = /^(?:game|core|tex|test)_patch_/i
+const ETRUNK_PATCH_VERSION_PATTERN = /\d+\.\d+\.\d+\.\d+/
+const PLACEHOLDER_PATCH_VERSION = '0.0.0.0'
+
 const normalizeWindowsPath = (value: string, fallback: string) => {
   const normalized = String(value || '').trim().replace(/\//g, '\\')
   if (!normalized) {
@@ -138,7 +145,7 @@ const normalizeWindowsPath = (value: string, fallback: string) => {
   return normalized.replace(/[\\]+$/, '')
 }
 
-export const normalizePakBaseName = (rawName: string) => {
+const normalizePakInputBaseName = (rawName: string) => {
   const trimmed = String(rawName || '').trim()
   if (!trimmed) {
     throw new Error('pak 名称不能为空')
@@ -151,11 +158,76 @@ export const normalizePakBaseName = (rawName: string) => {
   if (!withoutExt || /[<>:"|?*]/.test(withoutExt)) {
     throw new Error('pak 名称包含非法字符')
   }
-  const suffix = withoutExt.replace(/^(?:game|core|tex|test)_patch_/i, '')
+  return withoutExt
+}
+
+const getPreferredRemoteVersion = (remotePakFiles?: string[]) => {
+  if (!Array.isArray(remotePakFiles) || !remotePakFiles.length) {
+    return ''
+  }
+  return extractRemotePakVersions(remotePakFiles.join('\n')).selectedVersion
+}
+
+const appendVersionWhenMissing = (baseName: string, remotePakFiles?: string[]) => {
+  const remoteVersion = getPreferredRemoteVersion(remotePakFiles)
+  if (remoteVersion && baseName.includes(PLACEHOLDER_PATCH_VERSION)) {
+    return baseName.replaceAll(PLACEHOLDER_PATCH_VERSION, remoteVersion)
+  }
+  if (ETRUNK_PATCH_VERSION_PATTERN.test(baseName)) {
+    return baseName
+  }
+  return remoteVersion ? `${baseName}_${remoteVersion}` : baseName
+}
+
+export const normalizePakBaseName = (rawName: string, remotePakFiles?: string[]) => {
+  const withoutExt = normalizePakInputBaseName(rawName)
+  const match = withoutExt.match(PATCH_NAME_PATTERN)
+  if (match) {
+    return appendVersionWhenMissing(withoutExt, remotePakFiles)
+  }
+
+  const suffix = withoutExt.replace(KNOWN_PATCH_NAME_PATTERN, '')
   if (!suffix) {
     throw new Error('pak 名称缺少版本或用途后缀')
   }
-  return `${DEFAULT_PATCH_PREFIX}${suffix}`
+  return appendVersionWhenMissing(`${DEFAULT_PATCH_PREFIX}${suffix}`, remotePakFiles)
+}
+
+const normalizeRemotePakBaseNames = (remotePakFiles: string[] | undefined) => {
+  return (Array.isArray(remotePakFiles) ? remotePakFiles : [])
+    .map((fileName) => {
+      const trimmed = String(fileName || '').trim()
+      if (!trimmed.toLowerCase().endsWith('.pak')) return null
+      if (/[\\/]/.test(trimmed) || trimmed.includes('..') || /[<>:"|?*]/.test(trimmed)) return null
+      const baseName = trimmed.replace(/\.pak$/i, '')
+      const match = baseName.match(PATCH_NAME_PATTERN)
+      if (!match) return null
+      return {
+        baseName,
+        prefix: match[1]!.toLowerCase(),
+        suffix: match[2]!.toLowerCase(),
+      }
+    })
+    .filter((item): item is { baseName: string, prefix: string, suffix: string } => Boolean(item))
+}
+
+export const inferPakTargetBaseName = (rawName: string, remotePakFiles?: string[]) => {
+  const inputBaseName = normalizePakInputBaseName(rawName)
+  const inputMatch = inputBaseName.match(PATCH_NAME_PATTERN)
+  if (inputMatch) {
+    return appendVersionWhenMissing(inputBaseName, remotePakFiles)
+  }
+
+  const normalizedDefault = normalizePakBaseName(rawName, remotePakFiles)
+  const inputSuffix = inputBaseName.replace(KNOWN_PATCH_NAME_PATTERN, '').toLowerCase()
+
+  const remoteMatches = normalizeRemotePakBaseNames(remotePakFiles)
+    .filter((item) => item.suffix === inputSuffix)
+  if (!remoteMatches.length) {
+    return normalizedDefault
+  }
+
+  return remoteMatches[0]!.baseName
 }
 
 export const normalizeRemotePakFileName = (rawName: string) => {
@@ -339,7 +411,7 @@ export const listLocalPakFiles = (directory: string): LocalPakFile[] => {
     .sort((left, right) => right.mtimeMs - left.mtimeMs || left.name.localeCompare(right.name))
 }
 
-const resolvePakPushFile = (source: PakPushSource): PakPushFile => {
+const resolvePakPushFile = (source: PakPushSource, remotePakFiles?: string[], requireSig = false): PakPushFile => {
   const pakPath = normalizeWindowsPath(source.pakPath, '')
   if (!pakPath || !fs.existsSync(pakPath) || !fs.statSync(pakPath).isFile()) {
     throw new Error(`Pak 文件不存在：${source.pakPath}`)
@@ -351,8 +423,13 @@ const resolvePakPushFile = (source: PakPushSource): PakPushFile => {
   const sourcePakName = path.basename(pakPath)
   const sourceBaseName = sourcePakName.replace(/\.pak$/i, '')
   const sigPath = path.join(path.dirname(pakPath), `${sourceBaseName}.sig`)
-  const targetBaseName = normalizePakBaseName(source.targetPakName || sourcePakName)
+  const targetBaseName = source.targetPakName
+    ? normalizePakBaseName(source.targetPakName, remotePakFiles)
+    : inferPakTargetBaseName(sourcePakName, remotePakFiles)
   const hasSig = fs.existsSync(sigPath)
+  if (requireSig && !hasSig) {
+    throw new Error(`缺少同名 .sig 文件：${sigPath}`)
+  }
 
   return {
     pakPath,
@@ -388,7 +465,7 @@ const appendInstallSteps = (
 }
 
 export const createPakPushFilesPlan = (payload: PakPushFilesPayload): PakPushFilesPlan => {
-  const files = payload.sources.map(resolvePakPushFile)
+  const files = payload.sources.map((source) => resolvePakPushFile(source, payload.remotePakFiles, payload.requireSig === true))
   if (!files.length) {
     throw new Error('请选择至少一个 Pak 文件')
   }

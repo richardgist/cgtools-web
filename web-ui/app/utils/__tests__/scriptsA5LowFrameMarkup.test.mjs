@@ -51,7 +51,7 @@ assert.doesNotMatch(presetBlock, /class="a5-command-box"/)
 assert.doesNotMatch(presetBlock, /class="a5-point-copy"/)
 assert(manualStart < mapGateStart, 'manual console input should remain separate from map-point presets')
 
-assert.match(scriptsPage, /\.page-grid\s*{[^}]*grid-template-columns:\s*320px minmax\(0,\s*1fr\)/s)
+assert.match(scriptsPage, /\.page-grid\s*{[^}]*grid-template-columns:\s*420px minmax\(0,\s*1fr\)/s)
 assert.match(scriptsPage, /\.terminal-panel\s*{[^}]*min-width:\s*0/s)
 assert.match(scriptsPage, /\.console-panel\s*{[^}]*flex:\s*0 0 auto/s)
 assert.match(scriptsPage, /\.console-panel\s*{[^}]*max-height:\s*70vh/s)

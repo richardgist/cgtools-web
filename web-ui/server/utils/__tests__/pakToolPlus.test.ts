@@ -18,6 +18,7 @@ import {
   extractRemotePakVersions,
   findLatestGeneratedPakPair,
   getPakToolStatus,
+  inferPakTargetBaseName,
   listLocalPakFiles,
   normalizePakBaseName,
   normalizeRemotePakFileName,
@@ -29,7 +30,7 @@ const expectedExe = 'E:\\CJGame\\trunk\\Survive\\Paktools\\CookAndPakAsset\\Do.b
 
 assert.equal(DEFAULT_PROJECT_ROOT, expectedProjectRoot)
 assert.equal(DEFAULT_PAK_TOOL_EXE, expectedExe)
-assert.equal(DEFAULT_PATCH_PREFIX, 'tex_patch_')
+assert.equal(DEFAULT_PATCH_PREFIX, 'game_patch_')
 
 const rootPaths = buildPakToolPathsFromProjectRoot(DEFAULT_PROJECT_ROOT)
 assert.equal(rootPaths.projectRoot, expectedProjectRoot)
@@ -59,9 +60,24 @@ assert.equal(
   buildAndroidSavedPaksDir(DEFAULT_PACKAGE_NAME, DEFAULT_GAME_NAME),
   '/sdcard/Android/data/com.tencent.tmgp.pubgmhd/files/UE4Game/ShadowTrackerExtra/ShadowTrackerExtra/Saved/Paks',
 )
-assert.equal(normalizePakBaseName('hotfix_test.pak'), 'tex_patch_hotfix_test')
-assert.equal(normalizePakBaseName('game_patch_1.37.0.21089.pak'), 'tex_patch_1.37.0.21089')
+assert.equal(normalizePakBaseName('hotfix_test.pak'), 'game_patch_hotfix_test')
+assert.equal(normalizePakBaseName('game_patch_1.37.0.21089.pak'), 'game_patch_1.37.0.21089')
 assert.equal(normalizePakBaseName('tex_patch_ui_1.37.0.21089.pak'), 'tex_patch_ui_1.37.0.21089')
+assert.equal(normalizePakBaseName('test_patch_1.37.0.21089.pak'), 'game_patch_1.37.0.21089')
+assert.equal(normalizePakBaseName('hotfix_test.pak', [
+  'game_patch_1.37.0.21089.pak',
+  'tex_patch_ui_1.37.0.21089.pak',
+]), 'game_patch_hotfix_test_1.37.0.21089')
+assert.equal(normalizePakBaseName('game_patch_0.0.0.0.pak', [
+  'game_patch_1.37.0.21089.pak',
+  'tex_patch_ui_1.37.0.21089.pak',
+]), 'game_patch_1.37.0.21089')
+assert.equal(inferPakTargetBaseName('game_patch_9.9.9.9bbb.pak', [
+  'tex_patch_9.9.9.9bbb.pak',
+]), 'game_patch_9.9.9.9bbb')
+assert.equal(inferPakTargetBaseName('ui_1.37.0.21089.pak', [
+  'tex_patch_ui_1.37.0.21089.pak',
+]), 'tex_patch_ui_1.37.0.21089')
 assert.throws(() => normalizePakBaseName('../bad'), /pak 名称不能包含路径分隔符/)
 assert.equal(normalizeRemotePakFileName('tex_patch_ui_1.37.0.21089.pak'), 'tex_patch_ui_1.37.0.21089.pak')
 assert.throws(() => normalizeRemotePakFileName('../bad.pak'), /pak 名称不能包含路径分隔符/)
@@ -131,8 +147,8 @@ const pushPlan = createPakPushPlan({
   gameName: DEFAULT_GAME_NAME,
   deviceSerial: 'DEVICE123',
 })
-assert.equal(pushPlan.targetPakName, 'tex_patch_hotfix_test.pak')
-assert.equal(pushPlan.targetSigName, 'tex_patch_hotfix_test.sig')
+assert.equal(pushPlan.targetPakName, 'game_patch_hotfix_test.pak')
+assert.equal(pushPlan.targetSigName, 'game_patch_hotfix_test.sig')
 assert.equal(pushPlan.remoteTempDir, '/data/local/tmp/cgtools-pak-push')
 assert.deepEqual(pushPlan.steps.map((step) => step.args.slice(0, 2)), [
   ['-s', 'DEVICE123'],
@@ -145,10 +161,10 @@ assert.deepEqual(pushPlan.steps.map((step) => step.args.slice(0, 2)), [
   ['-s', 'DEVICE123'],
   ['-s', 'DEVICE123'],
 ])
-assert(pushPlan.steps.some((step) => step.args.join(' ').includes(`${pushPlan.remoteDir}/tex_patch_hotfix_test.pak`)))
-assert(pushPlan.steps.some((step) => step.args.join(' ').includes(`${pushPlan.remoteDir}/tex_patch_hotfix_test.sig`)))
-assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteTempDir}/tex_patch_hotfix_test.pak`)))
-assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteTempDir}/tex_patch_hotfix_test.sig`)))
+assert(pushPlan.steps.some((step) => step.args.join(' ').includes(`${pushPlan.remoteDir}/game_patch_hotfix_test.pak`)))
+assert(pushPlan.steps.some((step) => step.args.join(' ').includes(`${pushPlan.remoteDir}/game_patch_hotfix_test.sig`)))
+assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteTempDir}/game_patch_hotfix_test.pak`)))
+assert(pushPlan.steps.some((step) => step.args.includes(`${pushPlan.remoteTempDir}/game_patch_hotfix_test.sig`)))
 assert.equal(pushPlan.steps.filter((step) => step.cmd === 'adb' && step.args.includes('push')).length, 2)
 assert(pushPlan.steps
   .filter((step) => step.name.startsWith('Push '))
@@ -156,24 +172,31 @@ assert(pushPlan.steps
 
 const multiPushPlan = createPakPushFilesPlan({
   sources: [
-    { pakPath: newPak, targetPakName: 'game_patch_0.0.0.0.pak' },
-    { pakPath: extraPak, targetPakName: 'ui_1.37.0.21089.pak' },
+    { pakPath: newPak },
+    { pakPath: extraPak },
   ],
   packageName: DEFAULT_PACKAGE_NAME,
   gameName: DEFAULT_GAME_NAME,
+  remotePakFiles: ['tex_patch_ui_1.37.0.21089.pak'],
 })
 assert.equal(multiPushPlan.files.length, 2)
 assert.deepEqual(multiPushPlan.files.map((file) => file.targetPakName), [
-  'tex_patch_0.0.0.0.pak',
+  'game_patch_1.37.0.21089.pak',
   'tex_patch_ui_1.37.0.21089.pak',
 ])
 assert.equal(multiPushPlan.files[0].hasSig, true)
 assert.equal(multiPushPlan.files[1].hasSig, false)
 assert.equal(multiPushPlan.steps.filter((step) => step.cmd === 'adb' && step.args.includes('push')).length, 3)
 assert.throws(() => createPakPushFilesPlan({
+  sources: [{ pakPath: extraPak }],
+  packageName: DEFAULT_PACKAGE_NAME,
+  gameName: DEFAULT_GAME_NAME,
+  requireSig: true,
+}), /缺少同名 \.sig 文件/)
+assert.throws(() => createPakPushFilesPlan({
   sources: [
     { pakPath: newPak, targetPakName: 'game_patch_0.0.0.0.pak' },
-    { pakPath: newPak, targetPakName: 'tex_patch_0.0.0.0.pak' },
+    { pakPath: newPak, targetPakName: 'test_patch_0.0.0.0.pak' },
   ],
 }), /推送目标名重复/)
 

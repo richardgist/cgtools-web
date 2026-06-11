@@ -930,7 +930,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
 interface KnowledgeCard {
   id: string
@@ -983,6 +983,8 @@ const CARD_ID_PATTERN = /^KC-\d{4}[-_]\d{2}[-_]\d{2}[-_]\d{3}$/
 const cards = ref<KnowledgeCard[]>([])
 const loading = ref(false)
 const rebuildingIndex = ref(false)
+const KNOWLEDGE_AUTO_REFRESH_INTERVAL_MS = 15_000
+let knowledgeAutoRefreshTimer: ReturnType<typeof setInterval> | null = null
 const activeView = ref<'cards' | 'graph' | 'architecture'>('architecture')
 
 // --- 知识首页分类导航：先按问题域收敛，再进入子分类卡片 ---
@@ -1507,7 +1509,7 @@ function selectKnowledgeSubcategoryFromMap(category: KnowledgeHomeCategory, subc
 
 function exploreKnowledgeSubcategoryInCardsView() {
   if (!selectedKnowledgeSubcategory.value) return
-  searchText.value = selectedKnowledgeSubcategory.value.title
+  searchText.value = ''
   activeView.value = 'cards'
 }
 const vaultPath = ref('')
@@ -1536,6 +1538,11 @@ function getLatestDateKey(mode: 'year' | 'month' | 'week' | 'day'): string {
 }
 
 function syncDefaultDateSelection() {
+  if (searchText.value.trim()) {
+    activeDateKeys.value = new Set()
+    return
+  }
+
   if (dateTabMode.value !== 'day') {
     activeDateKeys.value = new Set()
     return
@@ -1555,6 +1562,21 @@ watch(dateTabMode, () => {
   syncDefaultDateSelection()
 })
 const activeTags = ref(new Set<string>())
+
+function clearCardFilterFacets() {
+  activeDomains.value = new Set()
+  activeDifficulties.value = new Set()
+  activeDateKeys.value = new Set()
+  activeTags.value = new Set()
+}
+
+watch(searchText, value => {
+  if (value.trim()) {
+    clearCardFilterFacets()
+  } else {
+    syncDefaultDateSelection()
+  }
+})
 
 const selectedCard = ref<KnowledgeCard | null>(null)
 const selectedIsCard = computed(() => Boolean(selectedCard.value && CARD_ID_PATTERN.test(selectedCard.value.id)))
@@ -1795,12 +1817,12 @@ const topTags = computed(() => {
 
 // Filtered cards
 const filteredCards = computed(() => {
+  const query = searchText.value.trim().toLowerCase()
   return cards.value.filter(card => {
     // Search
-    if (searchText.value) {
-      const s = searchText.value.toLowerCase()
-      const searchable = `${card.title} ${card.domain} ${(card.tags || []).join(' ')} ${card.summary || ''} ${card.source || ''}`.toLowerCase()
-      if (!searchable.includes(s)) return false
+    if (query) {
+      const searchable = `${card.id} ${card.title} ${card.domain} ${(card.tags || []).join(' ')} ${card.summary || ''} ${card.source || ''} ${card.content || ''}`.toLowerCase()
+      return searchable.includes(query)
     }
     // Domain
     if (activeDomains.value.size > 0 && !activeDomains.value.has(card.domain)) return false
@@ -2121,8 +2143,9 @@ async function openGraphNode(node: KnowledgeGraphNode) {
 }
 
 // Fetch cards
-async function refreshCards() {
-  loading.value = true
+async function refreshCards(options: { silent?: boolean } = {}) {
+  if (loading.value || rebuildingIndex.value) return
+  if (!options.silent) loading.value = true
   try {
     const data = await $fetch<{
       cards: KnowledgeCard[]
@@ -2140,7 +2163,7 @@ async function refreshCards() {
     cards.value = []
     syncDefaultDateSelection()
   } finally {
-    loading.value = false
+    if (!options.silent) loading.value = false
   }
 }
 
@@ -3790,7 +3813,19 @@ function onKeyDown(e: KeyboardEvent) {
 onMounted(() => {
   refreshCards()
   void refreshDefaultImportDirectoryState()
+  knowledgeAutoRefreshTimer = setInterval(() => {
+    void refreshCards({ silent: true })
+    if (activeView.value === 'graph') void refreshGraph()
+  }, KNOWLEDGE_AUTO_REFRESH_INTERVAL_MS)
   document.addEventListener('keydown', onKeyDown)
+})
+
+onBeforeUnmount(() => {
+  if (knowledgeAutoRefreshTimer) {
+    clearInterval(knowledgeAutoRefreshTimer)
+    knowledgeAutoRefreshTimer = null
+  }
+  document.removeEventListener('keydown', onKeyDown)
 })
 </script>
 

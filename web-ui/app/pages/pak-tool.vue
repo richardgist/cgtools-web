@@ -117,14 +117,14 @@
             </div>
             <div class="field-row">
               <label>单文件目标名</label>
-              <input v-model="pakTargetName" class="fluent-input path-input" placeholder="例如 tex_patch_ui_1.37.0.12050.pak" />
+              <input v-model="pakTargetName" class="fluent-input path-input" placeholder="例如 game_patch_1.37.0.12050.pak" />
               <div class="inline-actions">
                 <button class="fluent-btn sub" :disabled="!status?.latestGeneratedPak" @click="useSourcePakName">用源名称</button>
               </div>
             </div>
             <div class="field-row hint-row">
               <span></span>
-              <div class="field-hint">只选 1 个本地 Pak 时会使用上面的目标名；多选时按各自源文件名推送，并统一规范为 tex_patch_ 前缀。若同目录存在同名 .sig，会一起推送。</div>
+              <div class="field-hint">只选 1 个本地 Pak 时会使用上面的目标名；多选或拖拽时优先保留 game/core/tex_patch_ 类型，无前缀时默认补 game_patch_。若同目录存在同名 .sig，会一起推送。</div>
             </div>
           </div>
 
@@ -211,7 +211,9 @@
           <div v-if="remotePakFiles.length" class="remote-list">
             <label v-for="name in remotePakFiles" :key="name" class="pak-check-row remote">
               <input v-model="selectedRemotePakNames" type="checkbox" :value="name" />
-              <div class="pak-name">{{ name }}</div>
+              <button class="pak-name copy-name" type="button" title="复制 Pak 名称" @click.stop="copyPakName(name)">
+                {{ name }}
+              </button>
               <div class="pak-meta">{{ parsePakVersion(name) || '-' }}</div>
             </label>
           </div>
@@ -238,7 +240,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 const DEFAULT_PROJECT_ROOT = 'E:\\CJGame\\trunk'
 const DEFAULT_PACKAGE_NAME = 'com.tencent.tmgp.pubgmhd'
 const DEFAULT_GAME_NAME = 'ShadowTrackerExtra'
-const DEFAULT_PATCH_PREFIX = 'tex_patch_'
+const DEFAULT_PATCH_PREFIX = 'game_patch_'
 const LEGACY_STORAGE_KEY = 'cgtools_pak_tool_plus_exe_v1'
 const SINGLE_ROOT_STORAGE_KEY = 'cgtools_pak_tool_project_root_v1'
 const ROOT_STORE_KEY = 'cgtools_pak_tool_project_root_profiles_v1'
@@ -253,7 +255,7 @@ const isRefreshing = ref(false)
 const isLaunching = ref(false)
 const isPushingPak = ref(false)
 const isFetchingRemoteVersion = ref(false)
-const pakTargetName = ref('tex_patch_0.0.0.0.pak')
+const pakTargetName = ref('game_patch_0.0.0.0.pak')
 const packageName = ref(DEFAULT_PACKAGE_NAME)
 const deviceSerial = ref('')
 
@@ -387,6 +389,41 @@ const appendLog = (type, text) => {
   logs.value.push({ type, text })
 }
 
+const copyText = async (text) => {
+  const value = String(text || '')
+  if (!value) return false
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return true
+  }
+
+  if (typeof document === 'undefined') {
+    return false
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
+const copyPakName = async (name) => {
+  try {
+    const copied = await copyText(name)
+    appendLog(copied ? 'info' : 'stderr', copied
+      ? `[copy] 已复制 Pak 名称：${name}\n`
+      : `[copy] 复制失败：${name}\n`)
+  } catch (error) {
+    appendLog('stderr', `[copy] 复制失败：${getErrorMessage(error)}\n`)
+  }
+}
+
 const getErrorMessage = (error, fallback = '未知错误') => {
   return error?.data?.statusMessage || error?.statusMessage || error?.message || fallback
 }
@@ -452,9 +489,12 @@ const openPath = async (path, mode) => {
   }
 }
 
-const formatTexPatchName = (fileName) => {
+const formatMountablePatchName = (fileName) => {
   const sourceName = String(fileName || '0.0.0.0.pak').trim()
   const baseName = sourceName.replace(/\.pak$/i, '').replace(/\.sig$/i, '')
+  if (/^(?:game|core|tex)_patch_/i.test(baseName)) {
+    return `${baseName}.pak`
+  }
   const suffix = baseName.replace(/^(?:game|core|tex|test)_patch_/i, '') || '0.0.0.0'
   return `${DEFAULT_PATCH_PREFIX}${suffix}.pak`
 }
@@ -480,12 +520,12 @@ const launchTool = async () => {
 
 const useSourcePakName = () => {
   if (status.value?.latestGeneratedPak?.sourcePakName) {
-    pakTargetName.value = formatTexPatchName(status.value.latestGeneratedPak.sourcePakName)
+    pakTargetName.value = formatMountablePatchName(status.value.latestGeneratedPak.sourcePakName)
   }
 }
 
 const applyVersionToPakName = (fileName, version) => {
-  const sourceName = formatTexPatchName(fileName || status.value?.latestGeneratedPak?.sourcePakName || '0.0.0.0.pak')
+  const sourceName = formatMountablePatchName(fileName || status.value?.latestGeneratedPak?.sourcePakName || '0.0.0.0.pak')
   const baseName = sourceName.replace(/\.pak$/i, '')
   const nextBaseName = /\d+\.\d+\.\d+\.\d+/.test(baseName)
     ? baseName.replace(/\d+\.\d+\.\d+\.\d+/g, version)
@@ -528,7 +568,12 @@ const formatStepResult = (result) => {
 const appendPushResults = (res) => {
   const files = Array.isArray(res.files) ? res.files : []
   if (files.length) {
-    appendLog('info', `[push] ${files.length} 个 Pak -> ${res.remoteDir}\n${files.map((file) => `  ${file.sourcePakName} -> ${file.targetPakName}${file.hasSig ? ' (+sig)' : ''}`).join('\n')}\n`)
+    appendLog('info', `[push] ${files.length} 个 Pak -> ${res.remoteDir}\n${files.map((file) => {
+      const sigText = file.hasSig && file.sourceSigName && file.targetSigName
+        ? `\n  ${file.sourceSigName} -> ${file.targetSigName}`
+        : ''
+      return `  ${file.sourcePakName} -> ${file.targetPakName}${sigText}`
+    }).join('\n')}\n`)
   } else {
     appendLog('info', `[push] ${res.sourcePakName} -> ${res.remoteDir}/${res.targetPakName}\n`)
   }
@@ -548,7 +593,7 @@ const pushSelectedLocalPaks = async () => {
       body: {
         files: selected.map((file) => ({
           path: file.path,
-          targetPakName: singleTargetName || file.name,
+          targetPakName: singleTargetName || undefined,
         })),
         packageName: packageName.value,
         gameName: DEFAULT_GAME_NAME,
@@ -639,7 +684,7 @@ const selectLatestGeneratedPak = () => {
   const latest = latestGeneratedPakItem.value
   if (!latest) return
   selectedLocalPakPaths.value = [latest.path]
-  pakTargetName.value = formatTexPatchName(latest.name)
+  pakTargetName.value = formatMountablePatchName(latest.name)
 }
 
 const fetchRemotePakList = async (options = {}) => {
@@ -1089,6 +1134,26 @@ onMounted(async () => {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.copy-name {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  cursor: copy;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.copy-name:hover {
+  color: #7ecbff;
+}
+
+.copy-name:focus-visible {
+  outline: 1px solid rgba(126, 203, 255, 0.65);
+  outline-offset: 2px;
 }
 
 .pak-meta {

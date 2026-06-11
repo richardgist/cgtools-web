@@ -4,6 +4,8 @@ import {
   DEFAULT_GAME_NAME,
   DEFAULT_PACKAGE_NAME,
   createPakPushFilesPlan,
+  createRemotePakVersionListStep,
+  extractRemotePakVersions,
   type PakCommandStep,
 } from '../../utils/pakToolPlus'
 
@@ -52,6 +54,19 @@ const runStep = async (step: PakCommandStep): Promise<StepResult> => {
   })
 }
 
+const fetchRemotePakFilesForInference = async (
+  packageName: string,
+  gameName: string,
+  deviceSerial?: string,
+) => {
+  const step = createRemotePakVersionListStep(packageName, gameName, deviceSerial)
+  const result = await runStep(step)
+  if (result.code !== 0) {
+    return []
+  }
+  return extractRemotePakVersions(result.stdout).pakFiles
+}
+
 export default defineEventHandler(async (event) => {
   const body = await readBody<PushFilesBody>(event)
   const packageName = typeof body.packageName === 'string' && body.packageName.trim()
@@ -64,6 +79,7 @@ export default defineEventHandler(async (event) => {
 
   let plan
   try {
+    const remotePakFiles = await fetchRemotePakFilesForInference(packageName, gameName, deviceSerial)
     plan = createPakPushFilesPlan({
       sources: (Array.isArray(body.files) ? body.files : [])
         .map((file) => ({
@@ -74,6 +90,8 @@ export default defineEventHandler(async (event) => {
       packageName,
       gameName,
       deviceSerial,
+      remotePakFiles,
+      requireSig: true,
     })
   } catch (error) {
     throw createError({
